@@ -1,0 +1,5 @@
+---
+globs: *.py
+alwaysApply: false
+---
+Never silently catch errors; handle by type: for user-impacting or recoverable cases, log structured context to the console and rethrow/propagate as appropriate.

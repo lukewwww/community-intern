@@ -1,0 +1,17 @@
+---
+globs: *.md
+alwaysApply: false
+---
+Write documentation as a specification.
+
+Documentation MUST state clear, final decisions and requirements.
+
+Documentation MUST NOT include:
+- Recommendations or advice.
+- Options or alternatives.
+- Speculation or uncertainty.
+- Future-facing placeholders.
+
+Documentation MUST use definitive language that can be implemented and tested:
+- Requirement keywords: MUST, MUST NOT, SHALL, SHOULD. Use SHOULD only when a requirement level is intended.
+- Exact behavior, constraints, and interfaces.

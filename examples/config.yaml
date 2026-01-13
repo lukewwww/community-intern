@@ -1,0 +1,49 @@
+app:
+  dry_run: false
+
+logging:
+  level: INFO
+  file:
+    path: "data/logs/discord-intern.log"
+    rotation:
+      backup_count: 5
+
+discord:
+  token: "REPLACE_ME"
+  ai_timeout_seconds: 30
+
+ai:
+  request_timeout_seconds: 30
+  llm_timeout_seconds: 20
+  max_retries: 2
+
+  gating_prompt: |
+    You are a classifier. Decide if the user message is a question and whether it is in scope.
+    Return a strict JSON object.
+
+  answer_prompt: |
+    You are a helpful assistant. Answer using the provided snippets and cite sources by source_id.
+
+  verification_prompt: |
+    You are a strict reviewer. Decide if the draft answer is safe, clear, and grounded.
+    Return a strict JSON object.
+
+  max_sources: 6
+  max_snippets: 10
+  max_snippet_chars: 1200
+  min_snippet_score: 0.15
+
+  max_answer_chars: 3000
+  require_citations: true
+
+kb:
+  sources_dir: "data/knowledge-base/sources"
+  index_path: "data/knowledge-base/index.json"
+
+  web_fetch_timeout_seconds: 10
+  web_fetch_cache_dir: "data/knowledge-base/web-cache"
+
+  max_source_bytes: 2000000
+  max_snippet_chars: 1200
+  max_snippets_per_query: 10
+  max_sources_per_query: 6

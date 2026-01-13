@@ -1,0 +1,8 @@
+docs/setup.txt
+Explains how to install and configure the bot locally.
+Lists required environment variables and example values.
+Describes common startup errors and how to fix them.
+
+https://example.com/guide
+API reference for an external service used by the bot.
+Includes request/response examples and error codes.
