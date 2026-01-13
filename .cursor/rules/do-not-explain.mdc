@@ -1,0 +1,14 @@
+---
+alwaysApply: true
+---
+
+Do not add conversation-specific explanations, notes, or meta commentary into any generated or edited files.
+
+Only write the final intended content for the project, as if the file stands alone.
+
+Avoid adding text like:
+- "(summary)"
+- "(changed X to Y)"
+- "(only write B)"
+
+In fact, DO NOT add any parenthetical explanation at all!

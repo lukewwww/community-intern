@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "generated_at": "2026-01-12T00:00:00Z",
+  "sources": [
+    {
+      "source_id": "file:docs/setup.txt",
+      "type": "file",
+      "path": "docs/setup.txt",
+      "summary": [
+        "Explains how to configure the bot for a new Discord server.",
+        "Lists required intents and permissions."
+      ],
+      "tags": ["discord", "setup", "permissions"],
+      "suggested_questions": [
+        "Which Discord intents are required?",
+        "Why is message_content intent needed?"
+      ]
+    },
+    {
+      "source_id": "url:https://example.com/guide",
+      "type": "url",
+      "url": "https://example.com/guide",
+      "summary": [
+        "Provides troubleshooting steps for common startup errors."
+      ],
+      "tags": ["troubleshooting"],
+      "suggested_questions": [
+        "How do I fix a missing environment variable error?"
+      ]
+    }
+  ]
+}
+

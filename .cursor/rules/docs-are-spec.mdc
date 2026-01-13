@@ -1,0 +1,17 @@
+---
+globs: *.md
+alwaysApply: false
+---
+Write documentation as a specification.
+
+Documentation must state clear, final decisions and requirements.
+
+Do not include:
+- Recommendations or advice ("recommended", "best practice", "should consider")
+- Options or alternatives ("either A or B", "you can choose", "optionally")
+- Speculation or uncertainty ("might", "maybe", "could", "likely")
+- Future-facing placeholders ("we may add later", "in the future")
+
+Use definitive language that can be implemented and tested:
+- "MUST", "MUST NOT", "SHALL", "SHOULD" (only when a requirement level is intended)
+- Exact behavior, constraints, and interfaces
