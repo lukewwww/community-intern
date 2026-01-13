@@ -16,6 +16,8 @@ dependencies = [
   "pydantic==2.12.5",
   "PyYAML==6.0.2",
   "python-dotenv==1.0.1",
+  "beautifulsoup4==4.12.3",
+  "playwright==1.57.0",
 ]
 
 [tool.setuptools]

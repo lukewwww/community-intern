@@ -74,6 +74,8 @@ See `src/discord_intern/kb/interfaces.py` `KnowledgeBase`.
 ### URL fetching
 
 - Fetch with strict timeout `kb.web_fetch_timeout_seconds`.
+- Use a headless browser to wait for dynamic content (`networkidle` event) and capture the full DOM state.
+- Extract content from the `<body>` tag.
 - Cache responses in memory or on disk using a hash of the URL as the cache key and file name.
 - Enforce max download size `kb.max_source_bytes` and reject larger responses.
 

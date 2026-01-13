@@ -1,18 +1,14 @@
 from __future__ import annotations
 
-import asyncio
-import hashlib
 import logging
 import re
 from pathlib import Path
 from typing import Sequence, Set
-from urllib.parse import urlparse
-
-import aiohttp
 
 from discord_intern.ai.interfaces import AIClient
 from discord_intern.config.models import KnowledgeBaseSettings
 from discord_intern.kb.interfaces import IndexEntry, SourceContent
+from discord_intern.kb.web_fetcher import WebFetcher
 
 logger = logging.getLogger(__name__)
 
@@ -81,10 +77,18 @@ class FileSystemKnowledgeBase:
         entries: list[str] = []
 
         # Process files
-        for file_path in sorted(file_sources):
+        sorted_files = sorted(file_sources)
+        total_files = len(sorted_files)
+        total_items = total_files + len(url_sources)
+        processed_count = 0
+
+        for i, file_path in enumerate(sorted_files, 1):
+            processed_count += 1
+            rel_path = file_path.relative_to(sources_dir).as_posix()
+            logger.info("kb.processing_progress current=%d total=%d type=file path=%s", processed_count, total_items, rel_path)
             try:
                 text = file_path.read_text(encoding="utf-8")
-                rel_path = file_path.relative_to(sources_dir).as_posix()
+
                 summary = await self.ai_client.summarize_for_kb_index(
                     source_id=rel_path,
                     text=text,
@@ -95,14 +99,15 @@ class FileSystemKnowledgeBase:
                 logger.error("kb.file_processing_error path=%s error=%s", file_path, e)
 
         # Process URLs
-        # Ensure cache dir exists
-        cache_dir = Path(self.config.web_fetch_cache_dir)
-        cache_dir.mkdir(parents=True, exist_ok=True)
+        # Use WebFetcher context manager to keep browser open for batch processing
+        sorted_urls = sorted(url_sources)
 
-        async with aiohttp.ClientSession() as session:
-            for url in sorted(url_sources):
+        async with WebFetcher(self.config) as fetcher:
+            for i, url in enumerate(sorted_urls, 1):
+                processed_count += 1
+                logger.info("kb.processing_progress current=%d total=%d type=url url=%s", processed_count, total_items, url)
                 try:
-                    text = await self._fetch_url(session, url, cache_dir)
+                    text = await fetcher.fetch(url)
                     if not text:
                         continue
 
@@ -130,13 +135,10 @@ class FileSystemKnowledgeBase:
 
         # Check if it's a URL
         if source_id.startswith(("http://", "https://")):
-             cache_dir = Path(self.config.web_fetch_cache_dir)
-             # We need to re-fetch or read from cache.
-             # For load_source_content, we prefer cache but might need to fetch if missing.
-             # Ideally build_index ensures cache is populated.
-             # Here we reuse the fetch logic.
-             async with aiohttp.ClientSession() as session:
-                 text = await self._fetch_url(session, source_id, cache_dir)
+             # Reuse WebFetcher logic (it handles caching)
+             # Note: For single fetch, this will start/stop browser if not cached, which is heavy but safe.
+             async with WebFetcher(self.config) as fetcher:
+                 text = await fetcher.fetch(source_id)
                  return SourceContent(source_id=source_id, text=text)
 
         # Assume file path relative to sources_dir
@@ -149,34 +151,3 @@ class FileSystemKnowledgeBase:
             logger.warning("kb.load_file_error path=%s error=%s", file_path, e)
 
         return SourceContent(source_id=source_id, text="")
-
-    async def _fetch_url(self, session: aiohttp.ClientSession, url: str, cache_dir: Path) -> str:
-        """Fetch URL content, using cache if available."""
-        url_hash = hashlib.sha256(url.encode()).hexdigest()
-        cache_file = cache_dir / url_hash
-
-        if cache_file.exists():
-            return cache_file.read_text(encoding="utf-8")
-
-        try:
-            timeout = aiohttp.ClientTimeout(total=self.config.web_fetch_timeout_seconds)
-            async with session.get(url, timeout=timeout) as response:
-                if response.status != 200:
-                    logger.warning("kb.fetch_error url=%s status=%s", url, response.status)
-                    return ""
-
-                # Check size
-                content = await response.read()
-                if len(content) > self.config.max_source_bytes:
-                    logger.warning("kb.fetch_too_large url=%s size=%d", url, len(content))
-                    return ""
-
-                # Decode
-                text = content.decode("utf-8", errors="replace")
-
-                # Cache it
-                cache_file.write_text(text, encoding="utf-8")
-                return text
-        except Exception as e:
-            logger.warning("kb.fetch_exception url=%s error=%s", url, e)
-            return ""

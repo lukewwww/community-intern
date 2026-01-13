@@ -14,7 +14,7 @@ Discord Intern is an AI and LLM powered Discord FAQ assistant that monitors sele
 
 
 - **AI-generated, source-grounded answers**: An LLM generates answers from your documentation sources and can include citations back to those sources.
-- **Knowledge base from files and links**: Uses a local folder of text sources and can incorporate relevant web pages referenced by links.
+- **Knowledge base from files and links**: Uses a local folder of text sources and can incorporate relevant web pages referenced by links (supports dynamic content loading).
 - **Bring your own LLM**: Choose which LLM provider and model to use via configuration.
 - **Thread-first replies**: Answers live in message-backed threads rather than cluttering the channel.
 - **Configurable scope**: Communities can tune what kinds of questions are considered answerable without changing code.

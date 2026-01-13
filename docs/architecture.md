@@ -26,7 +26,7 @@ Primary documentation entry points:
   - Keep the AI module **stateless**: it must not persist chat history; conversation context is provided by the Bot Integration module.
   - Support a knowledge base made of:
     - Local text files in a folder
-    - Web pages fetched from links stored in files
+    - Web pages fetched from links stored in files (fetched via headless browser to support dynamic content)
   - Build a lightweight index at startup to help select the right sources quickly.
   - Make the AI module interface reusable so other platforms such as Telegram can be added later.
 
@@ -101,7 +101,7 @@ Full workflow and node specifications are defined in `docs/module-ai-response.md
 
 - Ingest content from:
   - A folder of local text files
-  - Links referenced inside those files, HTTP and HTTPS
+  - Links referenced inside those files, HTTP and HTTPS (fetched dynamically via headless browser)
 - On each startup:
   - Build a lightweight index to help select the right sources
 - Provide retrieval helpers to the AI module:
