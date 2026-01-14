@@ -9,7 +9,7 @@ from typing import Optional
 from bs4 import BeautifulSoup, Comment
 from playwright.async_api import async_playwright, Browser, Playwright
 
-from discord_intern.config.models import KnowledgeBaseSettings
+from community_intern.config.models import KnowledgeBaseSettings
 
 logger = logging.getLogger(__name__)
 
@@ -158,3 +158,6 @@ class WebFetcher:
         content = re.sub(r'\s+', ' ', content).strip()
 
         return content
+
+
+

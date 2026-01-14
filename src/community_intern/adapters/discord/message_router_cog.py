@@ -10,9 +10,9 @@ import aiohttp
 import discord
 from discord.ext import commands
 
-from discord_intern.ai.interfaces import AIClient
-from discord_intern.config.models import DiscordSettings
-from discord_intern.core.models import Conversation, Message, RequestContext
+from community_intern.ai.interfaces import AIClient
+from community_intern.config.models import DiscordSettings
+from community_intern.core.models import Conversation, Message, RequestContext
 
 logger = logging.getLogger(__name__)
 
@@ -375,3 +375,6 @@ class MessageRouterCog(commands.Cog):
             context.thread_id,
             context.message_id,
         )
+
+
+

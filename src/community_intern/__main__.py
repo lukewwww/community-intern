@@ -4,18 +4,18 @@ import argparse
 import asyncio
 import logging
 
-from discord_intern.adapters.discord import DiscordBotAdapter
-from discord_intern.ai import MockAIClient
-from discord_intern.config import YamlConfigLoader
-from discord_intern.config.models import ConfigLoadRequest
-from discord_intern.kb.impl import FileSystemKnowledgeBase
-from discord_intern.logging import init_logging
+from community_intern.adapters.discord import DiscordBotAdapter
+from community_intern.ai import MockAIClient
+from community_intern.config import YamlConfigLoader
+from community_intern.config.models import ConfigLoadRequest
+from community_intern.kb.impl import FileSystemKnowledgeBase
+from community_intern.logging import init_logging
 
 logger = logging.getLogger(__name__)
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="discord-intern", description="Discord Intern bot runner")
+    parser = argparse.ArgumentParser(prog="community-intern", description="Community Intern bot runner")
     parser.add_argument(
         "--config",
         default="data/config/config.yaml",
@@ -115,3 +115,6 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+

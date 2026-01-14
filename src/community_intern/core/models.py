@@ -43,3 +43,6 @@ class AIResult:
     citations: Sequence[Citation] = ()
     debug: Optional[dict] = None
 
+
+
+

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from discord_intern.core.models import AIResult, Conversation, RequestContext
+from community_intern.core.models import AIResult, Conversation, RequestContext
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,3 +39,6 @@ class MockAIClient:
     ) -> str:
         """Return a short plain-text description for the Knowledge Base index."""
         return f"Mock summary for {source_id}: {text[:50]}..."
+
+
+

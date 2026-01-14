@@ -25,7 +25,7 @@ This module is **stateless**: it does not store chat history. All conversational
 
 ## Public interface
 
-See `src/discord_intern/ai/interfaces.py` `AIClient`.
+See `src/community_intern/ai/interfaces.py` `AIClient`.
 
 The adapter treats the AI module as a single async call:
 
@@ -38,7 +38,7 @@ The Knowledge Base module needs to create a small startup index. Index generatio
 
 To avoid coupling index generation to the full `generate_reply` workflow, the AI module MUST expose a dedicated text summarization method.
 
-See `src/discord_intern/ai/interfaces.py` `AIClient.summarize_for_kb_index`.
+See `src/community_intern/ai/interfaces.py` `AIClient.summarize_for_kb_index`.
 
 ### Contract
 
@@ -56,7 +56,7 @@ Requirements:
 
 These are the same models used by the adapter design doc.
 
-See `src/discord_intern/core/models.py`.
+See `src/community_intern/core/models.py`.
 
 ## Configuration
 
@@ -136,7 +136,7 @@ flowchart LR
 
 Keep state minimal and typed. Do not store full documents; store only what the next node needs.
 
-See `src/discord_intern/ai/types.py`.
+See `src/community_intern/ai/types.py`.
 
 ### Statelessness enforcement
 
@@ -243,7 +243,7 @@ Behavior:
 
 Keep provider-specific logic behind a protocol so swapping providers does not change the graph logic.
 
-See `src/discord_intern/ai/interfaces.py` `LLMClient`.
+See `src/community_intern/ai/interfaces.py` `LLMClient`.
 
 ## Error handling and timeouts
 
@@ -301,3 +301,6 @@ The AI module MUST return a single normalized result:
 - `reply_text: str | None`
 - `citations: list[Citation]`
 - `debug: dict | None` never post to users
+
+
+

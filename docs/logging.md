@@ -28,7 +28,7 @@ Logging MUST be configured via the `logging` section in `config.yaml`.
   - `logging.file.path`
   - `when="midnight"` and `interval=1` (daily rotation)
   - `logging.file.rotation.backup_count` as `backupCount`
-- Rotated files MUST be split by date (daily) and MUST include the date in the rotated filename (for example, `discord-intern.log.2026-01-12`).
+- Rotated files MUST be split by date (daily) and MUST include the date in the rotated filename (for example, `community-intern.log.2026-01-12`).
 - If file logging is enabled and the file handler fails to initialize, the application MUST continue with console logging and MUST emit an error log describing the failure.
 
 ## Formatting and structure
@@ -41,3 +41,6 @@ Logging MUST be configured via the `logging` section in `config.yaml`.
 
 - Logging MUST be initialized once at startup, before any module does work.
 - Logging initialization failures MUST NOT be silently ignored.
+
+
+

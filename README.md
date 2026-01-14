@@ -1,6 +1,6 @@
-# Discord Intern
+# Community Intern
 
-Discord Intern is an AI and LLM powered Discord FAQ assistant that monitors selected channels, detects questions, and posts helpful answers in newly created threads to keep the main channel clean.
+Community Intern is an AI and LLM powered Discord FAQ assistant that monitors selected channels, detects questions, and posts helpful answers in newly created threads to keep the main channel clean.
 
 ## What it does
 
@@ -74,7 +74,7 @@ Notes:
 Before running the bot, initialize the knowledge base index. This will scan your sources folder and fetch any web links.
 
 ```bash
-python -m discord_intern init_kb
+python -m community_intern init_kb
 ```
 
 ### 5) Run the bot (mock AI mode)
@@ -82,11 +82,5 @@ python -m discord_intern init_kb
 This project currently ships with a mock AI client that always replies with a fixed message. This lets you validate Discord connectivity, routing, and thread creation before implementing the full AI module.
 
 ```bash
-python -m discord_intern run
-```
-
-Optional: override the mock reply text:
-
-```bash
-python -m discord_intern run --mock-reply-text "Hello from Discord Intern (mock)."
+python -m community_intern run
 ```

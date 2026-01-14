@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from typing import Any, Mapping, MutableMapping, Sequence
 
-from discord_intern.config.models import (
+from community_intern.config.models import (
     AppConfig,
     ConfigLoadRequest,
 )
@@ -108,3 +108,6 @@ class YamlConfigLoader:
 
         _apply_env_overrides(config, request.env_prefix)
         return AppConfig.model_validate(config)
+
+
+

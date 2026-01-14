@@ -4,7 +4,7 @@ from typing import Any, Mapping, Protocol, TypeVar
 
 from pydantic import BaseModel, ConfigDict
 
-from discord_intern.core.models import AIResult, Conversation, RequestContext
+from community_intern.core.models import AIResult, Conversation, RequestContext
 
 
 class AIClient(Protocol):
@@ -62,3 +62,6 @@ class LLMClient(Protocol):
         timeout_seconds: float,
     ) -> dict[str, Any]:
         """Return structured JSON output matching the provided schema."""
+
+
+

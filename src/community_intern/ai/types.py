@@ -29,7 +29,7 @@ class GraphState(TypedDict):
     This is a contract for orchestration state, not an implementation.
     """
 
-    # Inputs (types live in discord_intern.core.models and discord_intern.ai.interfaces)
+    # Inputs (types live in community_intern.core.models and community_intern.ai.interfaces)
     conversation: object
     context: object
     config: object
@@ -49,4 +49,7 @@ class GraphState(TypedDict):
 
     # Verification
     verification: VerificationResult
+
+
+
 

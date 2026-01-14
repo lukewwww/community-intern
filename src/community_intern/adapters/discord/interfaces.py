@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from discord_intern.ai.interfaces import AIClient
+from community_intern.ai.interfaces import AIClient
 
 
 class DiscordAdapter(Protocol):
@@ -21,4 +21,7 @@ class DiscordAdapter(Protocol):
 
     async def stop(self) -> None:
         """Stop the adapter and disconnect cleanly."""
+
+
+
 

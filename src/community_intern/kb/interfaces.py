@@ -45,3 +45,6 @@ class KnowledgeBase(Protocol):
 
     async def load_source_content(self, *, source_id: str) -> SourceContent:
         """Load full source content for a file path or URL identifier."""
+
+
+

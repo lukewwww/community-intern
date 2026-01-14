@@ -4,7 +4,7 @@ app:
 logging:
   level: INFO
   file:
-    path: "data/logs/discord-intern.log"
+    path: "data/logs/community-intern.log"
     rotation:
       backup_count: 5
 

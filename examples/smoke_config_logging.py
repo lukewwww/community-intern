@@ -3,9 +3,9 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from discord_intern.config import YamlConfigLoader
-from discord_intern.config.models import ConfigLoadRequest
-from discord_intern.logging import init_logging
+from community_intern.config import YamlConfigLoader
+from community_intern.config.models import ConfigLoadRequest
+from community_intern.logging import init_logging
 
 
 async def main() -> None:
@@ -19,3 +19,6 @@ async def main() -> None:
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+
+

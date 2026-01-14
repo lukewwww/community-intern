@@ -41,7 +41,7 @@ These models are shared at module boundaries. The Discord adapter is responsible
 
 See the shared boundary models in:
 
-- `src/discord_intern/core/models.py`
+- `src/community_intern/core/models.py`
 
 ## Adapter -> AI interface
 
@@ -49,7 +49,7 @@ The adapter depends on an AI client that exposes a single method and returns a s
 
 See:
 
-- `src/discord_intern/ai/interfaces.py` (`AIClient`)
+- `src/community_intern/ai/interfaces.py` (`AIClient`)
 
 ## Discord event handling design
 
@@ -201,3 +201,6 @@ Log fields per handled event:
 - Integration tests (manual or mocked):
   - Create message-backed thread from a channel message
   - Thread follow-up flow with full history
+
+
+

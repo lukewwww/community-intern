@@ -5,10 +5,10 @@ import re
 from pathlib import Path
 from typing import Sequence, Set
 
-from discord_intern.ai.interfaces import AIClient
-from discord_intern.config.models import KnowledgeBaseSettings
-from discord_intern.kb.interfaces import IndexEntry, SourceContent
-from discord_intern.kb.web_fetcher import WebFetcher
+from community_intern.ai.interfaces import AIClient
+from community_intern.config.models import KnowledgeBaseSettings
+from community_intern.kb.interfaces import IndexEntry, SourceContent
+from community_intern.kb.web_fetcher import WebFetcher
 
 logger = logging.getLogger(__name__)
 
@@ -151,3 +151,6 @@ class FileSystemKnowledgeBase:
             logger.warning("kb.load_file_error path=%s error=%s", file_path, e)
 
         return SourceContent(source_id=source_id, text="")
+
+
+

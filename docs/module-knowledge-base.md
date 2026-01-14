@@ -62,7 +62,7 @@ Notes:
 
 The AI module should not know about filesystem scanning or HTTP caching details. It should call a small retrieval API.
 
-See `src/discord_intern/kb/interfaces.py` `KnowledgeBase`.
+See `src/community_intern/kb/interfaces.py` `KnowledgeBase`.
 
 ## Ingestion
 
@@ -143,3 +143,6 @@ Metrics:
 - Integration tests:
   - Build index from a sample folder with a mix of files and URLs
   - Loading selected source content returns stable identifiers
+
+
+

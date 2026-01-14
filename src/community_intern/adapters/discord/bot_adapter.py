@@ -6,10 +6,10 @@ import logging
 import discord
 from discord.ext import commands
 
-from discord_intern.adapters.discord.interfaces import DiscordAdapter
-from discord_intern.adapters.discord.message_router_cog import MessageRouterCog
-from discord_intern.ai.interfaces import AIClient
-from discord_intern.config.models import AppConfig
+from community_intern.adapters.discord.interfaces import DiscordAdapter
+from community_intern.adapters.discord.message_router_cog import MessageRouterCog
+from community_intern.ai.interfaces import AIClient
+from community_intern.config.models import AppConfig
 
 logger = logging.getLogger(__name__)
 
@@ -90,3 +90,6 @@ class DiscordBotAdapter(DiscordAdapter):
     async def stop(self) -> None:
         if not self._bot.is_closed():
             await self._bot.close()
+
+
+

@@ -19,7 +19,7 @@ The application loads configuration in this exact order (later wins):
 3. `.env` (if present), loaded into the process environment
 4. Process environment variables
 
-The final merged configuration MUST be validated against the Pydantic schema in `src/discord_intern/config/models.py`. Unknown keys MUST fail validation.
+The final merged configuration MUST be validated against the Pydantic schema in `src/community_intern/config/models.py`. Unknown keys MUST fail validation.
 
 ## Environment variable override mapping
 
@@ -52,5 +52,8 @@ See the example config file: `examples/config.yaml`.
 
 Related contract types:
 
-- `src/discord_intern/ai/interfaces.py` (`AIConfig`)
-- `src/discord_intern/config/models.py` (`AppConfig`, `DiscordSettings`, `KnowledgeBaseSettings`)
+- `src/community_intern/ai/interfaces.py` (`AIConfig`)
+- `src/community_intern/config/models.py` (`AppConfig`, `DiscordSettings`, `KnowledgeBaseSettings`)
+
+
+

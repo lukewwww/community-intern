@@ -4,7 +4,7 @@ import logging
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 
-from discord_intern.config.models import LoggingSettings
+from community_intern.config.models import LoggingSettings
 
 
 def init_logging(settings: LoggingSettings) -> None:
@@ -65,3 +65,6 @@ def init_logging(settings: LoggingSettings) -> None:
 
 
 __all__ = ["init_logging"]
+
+
+

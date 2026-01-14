@@ -64,8 +64,8 @@ The system is split into three modules:
 
 ### Interfaces
 
-- Bot-to-AI boundary: `src/discord_intern/ai/interfaces.py` `AIClient`
-- Shared models and result schema: `src/discord_intern/core/models.py`
+- Bot-to-AI boundary: `src/community_intern/ai/interfaces.py` `AIClient`
+- Shared models and result schema: `src/community_intern/core/models.py`
 
 Implementation details for the Bot Integration module live in `docs/module-bot-integration.md`.
 
@@ -109,7 +109,7 @@ Full workflow and node specifications are defined in `docs/module-ai-response.md
 
 Contracts and examples:
 
-- Knowledge base interface contracts: `src/discord_intern/kb/interfaces.py`
+- Knowledge base interface contracts: `src/community_intern/kb/interfaces.py`
 - Example index artifact: `examples/kb_index.txt`
 Details: `docs/module-knowledge-base.md`.
 
@@ -121,7 +121,7 @@ Details: `docs/module-knowledge-base.md`.
 
 - **Config**
   - Load settings from `config.yaml` with environment-variable overrides.
-  - See `docs/configuration.md` and `src/discord_intern/config/models.py`.
+  - See `docs/configuration.md` and `src/community_intern/config/models.py`.
 
 ## Extensibility
 
@@ -130,3 +130,6 @@ To add a new platform such as Telegram, implement a new integration module that:
 - Converts platform events into the shared `Conversation` model
 - Calls the AI module via the same `generate_reply` boundary
 - Posts responses using the platform’s native reply/thread mechanism
+
+
+

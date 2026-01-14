@@ -5,7 +5,7 @@ from typing import Optional, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from discord_intern.ai.interfaces import AIConfig
+from community_intern.ai.interfaces import AIConfig
 
 
 class AppSettings(BaseModel):
@@ -29,7 +29,7 @@ class FileRotationSettings(BaseModel):
 class FileLoggingSettings(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    path: str = "data/logs/discord-intern.log"
+    path: str = "data/logs/community-intern.log"
     rotation: FileRotationSettings = Field(default_factory=FileRotationSettings)
 
 
@@ -90,3 +90,6 @@ class ConfigLoadRequest:
     yaml_path: str = "data/config/config.yaml"
     env_prefix: str = "APP__"
     dotenv_path: Optional[str] = ".env"
+
+
+
