@@ -25,7 +25,7 @@ This module owns **all Discord-specific concerns**: intents, permissions, rate l
 
 ## Runtime configuration
 
-All configuration is loaded from `config.yaml` with environment-variable overrides as specified in `docs/configuration.md`.
+All configuration is loaded from `config.yaml` with environment-variable overrides as specified in [`./configuration.md`](./configuration.md).
 
 The adapter reads these keys:
 
@@ -201,6 +201,3 @@ Log fields per handled event:
 - Integration tests (manual or mocked):
   - Create message-backed thread from a channel message
   - Thread follow-up flow with full history
-
-
-

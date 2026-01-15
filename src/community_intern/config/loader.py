@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 from pathlib import Path
 from typing import Any, MutableMapping, Sequence
 
@@ -19,6 +20,8 @@ def _read_yaml_config(path: Path) -> dict[str, Any]:
         ) from e
 
     if not path.exists():
+        _ensure_default_config(path)
+    if not path.exists():
         raise FileNotFoundError(f"Config file not found: {path}")
 
     raw = path.read_text(encoding="utf-8")
@@ -28,6 +31,24 @@ def _read_yaml_config(path: Path) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ValueError(f"Top-level YAML must be a mapping, got: {type(data).__name__}")
     return data
+
+
+def _ensure_default_config(target_path: Path) -> None:
+    example_path = Path("examples/config.yaml")
+    if not example_path.exists():
+        return
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(example_path, target_path)
+
+
+def _ensure_default_data_layout(yaml_path: Path) -> None:
+    if yaml_path.parent.name != "config":
+        return
+    data_root = yaml_path.parent.parent
+    (data_root / "config").mkdir(parents=True, exist_ok=True)
+    (data_root / "knowledge-base" / "sources").mkdir(parents=True, exist_ok=True)
+    (data_root / "knowledge-base" / "web-cache").mkdir(parents=True, exist_ok=True)
+    (data_root / "logs").mkdir(parents=True, exist_ok=True)
 
 
 def _load_dotenv_if_present(dotenv_path: Path) -> None:
@@ -85,6 +106,7 @@ def _apply_env_overrides(config: MutableMapping[str, Any], env_prefix: str) -> N
 class YamlConfigLoader:
     async def load(self, request: ConfigLoadRequest = ConfigLoadRequest()) -> AppConfig:
         yaml_path = Path(request.yaml_path)
+        _ensure_default_data_layout(yaml_path)
         config = _read_yaml_config(yaml_path)
 
         if request.dotenv_path is not None:

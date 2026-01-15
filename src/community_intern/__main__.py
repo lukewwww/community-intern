@@ -21,12 +21,6 @@ def _build_parser() -> argparse.ArgumentParser:
         default="data/config/config.yaml",
         help="Path to config.yaml (default: data/config/config.yaml)",
     )
-    parser.add_argument(
-        "--no-dotenv",
-        action="store_true",
-        help="Disable loading .env (env overrides still apply)",
-    )
-
     subparsers = parser.add_subparsers(dest="command", required=True, help="Command to run")
 
     # Command: run
@@ -57,7 +51,6 @@ async def _load_config(args: argparse.Namespace):
     loader = YamlConfigLoader()
     request = ConfigLoadRequest(
         yaml_path=args.config,
-        dotenv_path=None if args.no_dotenv else ".env",
     )
     return await loader.load(request)
 

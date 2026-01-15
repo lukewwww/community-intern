@@ -90,4 +90,4 @@ class ConfigLoadRequest:
 
     yaml_path: str = "data/config/config.yaml"
     env_prefix: str = "APP__"
-    dotenv_path: Optional[str] = ".env"
+    dotenv_path: Optional[str] = "data/.env"

@@ -22,9 +22,13 @@ Community Intern is an AI and LLM powered Discord FAQ assistant that monitors se
 
 ## Documentation
 
-See `docs/` for architecture and module-level documentation, plus configuration guidance.
+See [`./docs/architecture.md`](./docs//architecture.md) for architecture and module-level documentation, plus configuration guidance.
 
-## Get Started
+## Run with Docker
+
+Please follow [`./build/README.md`](./build/README.md) to start using Docker images.
+
+## Start from Source Code
 
 ### 1) Create a Discord bot and enable message content intent
 
@@ -51,7 +55,7 @@ $ ./venv/bin/activate
 
 **a) Create `data/config/config.yaml`**
 
-Start from `examples/config.yaml` and copy it to `data/config/config.yaml`.
+Start from [`./examples/config.yaml`](./examples/config.yaml) and copy it to `data/config/config.yaml`.
 
 ```yaml
 # Any OpenAI-compatible chat completion API could be used
@@ -71,11 +75,11 @@ The AI module is configured under the `ai` section in `data/config/config.yaml`.
 - `verification_prompt`: Verifies the draft answer for clarity, safety, and grounding.
 - `summarization_prompt`: Summarizes source text for the knowledge base index.
 
-The runtime enforces output format requirements for gating, selection, and verification in code. Keep your prompts focused on task intent rather than JSON schemas. For full details, see `docs/module-ai-response.md`.
+The runtime enforces output format requirements for gating, selection, and verification in code. Keep your prompts focused on task intent rather than JSON schemas. For full details, see [`./docs/module-ai-response.md`](./docs/module-ai-response.md).
 
 **b) Create `.env` for secrets**
 
-Create a `.env` file in the root directory (same level as `pyproject.toml`) to store sensitive keys.
+Create a `.env` file at `data/.env` to store sensitive keys.
 
 ```bash
 APP__DISCORD__TOKEN=your_discord_bot_token

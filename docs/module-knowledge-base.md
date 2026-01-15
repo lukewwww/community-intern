@@ -29,7 +29,7 @@ The KB module is designed for fast source selection and bounded retrieval.
 
 ## Runtime configuration
 
-All configuration is loaded from `config.yaml` with environment-variable overrides as specified in `docs/configuration.md`.
+All configuration is loaded from `config.yaml` with environment-variable overrides as specified in [`./configuration.md`](./configuration.md).
 
 The Knowledge Base reads these keys under the `kb` section:
 
@@ -85,7 +85,7 @@ See `src/community_intern/kb/interfaces.py` `KnowledgeBase`.
 
 For each source:
 - Use an LLM to produce a short description focused on what the source covers and when it is relevant.
-- The LLM summarization MUST be performed via the AI module's dedicated summarization method. See `docs/module-ai-response.md`.
+- The LLM summarization MUST be performed via the AI module's dedicated summarization method. See [`./module-ai-response.md`](./module-ai-response.md).
 
 The index generation step should be deterministic as much as possible to avoid noisy diffs.
 

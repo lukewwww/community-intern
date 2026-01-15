@@ -70,7 +70,7 @@ The system is split into three modules:
 - Bot-to-AI boundary: `src/community_intern/ai/interfaces.py` `AIClient`
 - Shared models and result schema: `src/community_intern/core/models.py`
 
-Implementation details for the Bot Integration module live in `docs/module-bot-integration.md`.
+Implementation details for the Bot Integration module live in [`./module-bot-integration.md`](./module-bot-integration.md).
 
 ## Module 2: AI Response
 
@@ -97,7 +97,7 @@ The AI module is implemented as a small LangGraph state graph:
 4. Answer generation
 5. Answer verification
 
-Full workflow and node specifications are defined in `docs/module-ai-response.md`.
+Full workflow and node specifications are defined in [`./module-ai-response.md`](./module-ai-response.md).
 
 ## Module 3: Knowledge Base
 
@@ -115,17 +115,17 @@ Contracts and examples:
 
 - Knowledge base interface contracts: `src/community_intern/kb/interfaces.py`
 - Example index artifact: `examples/kb_index.txt`
-Details: `docs/module-knowledge-base.md`.
+Details: [`./module-knowledge-base.md`](./module-knowledge-base.md).
 
 ## Observability and safety
 
 - **Logging**
   - Use structured logging and avoid storing private message content long-term.
-  - See `docs/logging.md`.
+  - See [`./logging.md`](./logging.md).
 
 - **Config**
   - Load settings from `config.yaml` with environment-variable overrides.
-  - See `docs/configuration.md` and `src/community_intern/config/models.py`.
+  - See [`./configuration.md`](./configuration.md) and `src/community_intern/config/models.py`.
 
 ## Extensibility
 
