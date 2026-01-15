@@ -72,8 +72,10 @@ The adapter is implemented as a single Discord.py Cog:
   - If the message is in a guild channel (and not a thread):
     - Batches consecutive messages from the same user in the same channel.
     - Waits for a quiet window before calling AI.
+    - Ignores user replies to other users.
     - If `should_reply=true`, creates a message-backed thread from the last message and posts the answer.
   - If the message is in a thread:
+    - Ignore threads not created by the bot.
     - Fetch the full thread history.
     - If the bot has not posted in the thread (detected by scanning the thread history for `author_id == BOT_USER_ID`), ignore the message.
     - Otherwise, call AI with the full thread context and post a follow-up when `should_reply=true`.
@@ -125,6 +127,37 @@ Rules:
 Default behavior:
 
 - Wait `discord.message_batch_wait_seconds`, default is 60 seconds.
+
+## Ignore rules
+
+- Ignore a channel message that is a reply to another user's message.
+- Ignore a thread not created by the bot.
+
+## User interaction cases
+
+This section lists the expected handling for user replies and thread usage.
+
+### Channel message cases
+
+| Case | Conditions | Handling |
+| --- | --- | --- |
+| New message | No reply reference | Add to user batch and wait for quiet window |
+| Reply to self | Reply reference exists and referenced author id equals sender id | Add to user batch and wait for quiet window |
+| Reply to another user | Reply reference exists and referenced author id differs from sender id | Ignore the message |
+| Reply reference not resolvable | Reply reference exists but message cannot be fetched | Ignore the message |
+
+### Thread message cases
+
+| Case | Conditions | Handling |
+| --- | --- | --- |
+| Thread created by bot | `thread.owner_id` equals `BOT_USER_ID` | Continue with history rules below |
+| Thread created by another user | `thread.owner_id` exists and differs from `BOT_USER_ID` | Ignore the thread message |
+| Thread has bot history | At least one message in history has `author_id == BOT_USER_ID` | Call AI with full thread history |
+| Thread lacks bot history | No bot messages in history | Ignore the message |
+
+### Notes
+
+- The example config uses `discord.message_batch_wait_seconds: 60`. The key is required.
 
 ## Sequence diagrams
 

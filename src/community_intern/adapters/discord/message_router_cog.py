@@ -150,9 +150,45 @@ class MessageRouterCog(commands.Cog):
         if message.author is None:
             return
 
+        if message.reference is not None and message.reference.message_id is not None:
+            referenced_message = await self._resolve_referenced_message(message=message)
+            if referenced_message is None:
+                return
+            if referenced_message.author is not None and referenced_message.author.id != message.author.id:
+                return
+
         key = (str(message.guild.id), str(channel_id), str(message.author.id))
         self._enqueue_user_batch(message=message, key=key)
         return
+
+    async def _resolve_referenced_message(self, *, message: discord.Message) -> Optional[discord.Message]:
+        reference = message.reference
+        if reference is None or reference.message_id is None:
+            return None
+
+        if isinstance(reference.resolved, discord.Message):
+            return reference.resolved
+
+        try:
+            return await message.channel.fetch_message(reference.message_id)
+        except discord.NotFound:
+            logger.warning(
+                "discord.reference_not_found platform=discord guild_id=%s channel_id=%s message_id=%s reference_id=%s",
+                str(message.guild.id) if message.guild is not None else None,
+                str(getattr(message.channel, "id", None)),
+                str(message.id),
+                str(reference.message_id),
+            )
+            return None
+        except discord.DiscordException:
+            logger.exception(
+                "discord.reference_fetch_failed platform=discord guild_id=%s channel_id=%s message_id=%s reference_id=%s",
+                str(message.guild.id) if message.guild is not None else None,
+                str(getattr(message.channel, "id", None)),
+                str(message.id),
+                str(reference.message_id),
+            )
+            return None
 
     def _enqueue_user_batch(self, *, message: discord.Message, key: tuple[str, str, str]) -> None:
         pending = self._pending_user_batches.get(key)
@@ -329,6 +365,9 @@ class MessageRouterCog(commands.Cog):
         )
 
     async def _handle_thread_message(self, *, message: discord.Message, thread: discord.Thread, bot_user_id: int) -> None:
+        if thread.owner_id is not None and thread.owner_id != bot_user_id:
+            return
+
         history: list[discord.Message]
         try:
             history = [m async for m in thread.history(limit=None, oldest_first=True)]
