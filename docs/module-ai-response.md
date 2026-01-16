@@ -66,7 +66,7 @@ Nodes represent distinct processing steps:
 2.  **Source Selection**: Uses the KB index to pick relevant files.
 3.  **Content Loading**: Fetches full text for selected files.
 4.  **Answer Generation**: Synthesizes an answer.
-5.  **Answer Verification**: Checks the answer for quality and safety.
+5.  **Answer Verification**: Optional final check for quality and safety.
 
 ```mermaid
 flowchart LR
@@ -76,7 +76,8 @@ flowchart LR
   Select -->|no sources| OutNo
   Select --> Load[3. Load selected source content]
   Load --> Gen[4. Generation]
-  Gen --> Ver[5. Verification]
+  Gen -->|if enabled| Ver[5. Verification]
+  Gen -->|if disabled| OutYes[Return should_reply=true]
   Ver -->|approved| OutYes[Return should_reply=true]
   Ver -->|rejected| OutNo
 ```
@@ -119,7 +120,7 @@ The Graph structure is the high-level container for the workflow logic.
 - **Goal**: Final safety check.
 - **Inputs**: Draft answer, source context, `verification_prompt`.
 - **Output**: `verification` (boolean).
-- **Behavior**: Acts as a "supervisor" to reject low-quality or unsafe answers.
+- **Behavior**: Acts as a "supervisor" to reject low-quality or unsafe answers. This step is skipped unless verification is enabled in configuration.
 
 ## Link inclusion
 
@@ -165,6 +166,7 @@ The AI module is configured under the `ai` section in `config.yaml`.
 ### Graph-Specific Keys (`generate_reply`)
 - **Workflow Timeout**: `graph_timeout_seconds` (End-to-end timeout for the entire graph execution).
 - **Project Introduction**: `project_introduction` (shared domain introduction appended to multiple prompt steps).
+- **Verification Toggle**: `enable_verification` (When `true`, run the verification step after generation. When `false`, return the generated answer as final without verification. Default: `false`.)
 - **Prompts**: `gating_prompt`, `selection_prompt`, `answer_prompt`, `verification_prompt`.
 - **Limits**: `max_sources`, `max_answer_chars`.
 

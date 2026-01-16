@@ -55,7 +55,7 @@ class LLMSelectionResult(BaseModel):
     selected_source_ids: List[str] = Field(description="List of source IDs relevant to the query")
 
 class LLMGenerationResult(BaseModel):
-    answer: str = Field(description="The generated answer text")
+    answer: Optional[str] = Field(description="The generated answer text, or null if the question cannot be answered from the provided context")
 
 class LLMVerificationResult(BaseModel):
     is_good_enough: bool = Field(description="Whether the answer is safe and accurate enough to post")
@@ -168,7 +168,17 @@ async def node_generation(state: GraphState, *, llm: ChatOpenAI) -> Dict[str, An
 
     try:
         result: LLMGenerationResult = await structured_llm.ainvoke(messages)
-        return {"draft_answer": result.answer}
+        answer = (result.answer or "").strip()
+        if not answer:
+            return {"draft_answer": "", "should_reply": False}
+        if not config.enable_verification:
+            return {
+                "draft_answer": answer,
+                "verification": None,
+                "should_reply": True,
+                "final_reply_text": answer,
+            }
+        return {"draft_answer": answer}
     except Exception as e:
         logger.exception("ai.generation_failed")
         return {"should_reply": False}
@@ -257,7 +267,9 @@ def build_ai_graph(config: AIConfig) -> Runnable:
 
     def check_generation(state: GraphState) -> str:
         if state.get("should_reply", False) and state.get("draft_answer"):
-            return "verification"
+            if state["config"].enable_verification:
+                return "verification"
+            return END
         return END
 
     def check_verification(state: GraphState) -> str:

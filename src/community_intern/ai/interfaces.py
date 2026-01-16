@@ -33,6 +33,9 @@ class AIConfig(BaseModel):
     llm_timeout_seconds: float
     max_retries: int
 
+    # Workflow policy
+    enable_verification: bool = False
+
     # Prompts and policy
     project_introduction: str = ""
     gating_prompt: str
