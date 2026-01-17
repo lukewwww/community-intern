@@ -38,6 +38,8 @@ The Knowledge Base reads these keys under the `kb` section:
 - `kb.links_file_path`
 - `kb.web_fetch_timeout_seconds`
 - `kb.web_fetch_cache_dir`
+- `kb.url_download_concurrency`
+- `kb.summarization_concurrency`
 - `kb.max_source_bytes`
 
 ## Cache and incremental updates
@@ -86,12 +88,15 @@ See `src/community_intern/kb/interfaces.py` `KnowledgeBase`.
 - Extract content from the `<body>` tag.
 - Cache responses in memory or on disk using a hash of the URL as the cache key and file name.
 - Enforce max download size `kb.max_source_bytes` and reject larger responses.
+- URL downloads MUST run independently from LLM summarization within the update workflow.
+- URL download concurrency MUST be limited by `kb.url_download_concurrency`.
 
 ### Index generation
 
 For each source:
 - Use an LLM to produce a short description focused on what the source covers and when it is relevant.
 - The LLM summarization MUST be performed via the AI module's dedicated summarization method. See [`./module-ai-response.md`](./module-ai-response.md).
+- LLM summarization MUST run as an independent phase and MUST be limited by `kb.summarization_concurrency`.
 
 The index generation step should be deterministic as much as possible to avoid noisy diffs.
 

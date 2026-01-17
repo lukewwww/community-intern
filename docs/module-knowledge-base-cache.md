@@ -15,6 +15,8 @@ The mechanism applies to:
 - The Knowledge Base MUST avoid re-fetching all URLs on every incremental update run.
 - The Knowledge Base MUST produce a stable and human-readable `index.txt`.
 - The Knowledge Base MUST keep the same processing rules across `init_kb`, application startup sync, and runtime refresh.
+- The Knowledge Base MUST run URL downloads and LLM summarization as independent phases.
+- The Knowledge Base MUST enforce separate concurrency limits for URL downloads and LLM summarization.
 
 ### Core approach
 
@@ -43,6 +45,8 @@ All configuration is loaded from `config.yaml` with environment-variable overrid
 This mechanism reads these keys under the `kb` section:
 
 - `kb.index_cache_path`
+- `kb.url_download_concurrency`
+- `kb.summarization_concurrency`
 - `kb.url_refresh_min_interval_seconds`
 - `kb.runtime_refresh_tick_seconds`
 
@@ -58,6 +62,7 @@ Each update workflow execution MUST perform the following steps while holding a 
 - Process file sources using the rules in "File source processing".
 - Process URL sources using the rules in "URL source processing".
 - After any per-source change, persist the updated cache state and regenerate the index file at `kb.index_path`.
+- The workflow MUST run URL downloads and LLM summarization as separate phases.
 
 ### Source discovery
 
@@ -88,20 +93,16 @@ For each discovered file source, the Knowledge Base MUST apply these rules:
 - If the file source is new:
   - Load the file content as UTF-8 text.
   - Compute `content_hash`.
-  - Attempt AI summarization to produce `summary_text`.
-  - On success, store the cache record with `summary_pending = false`.
-  - On failure, store the cache record with `summary_text = ""` and `summary_pending = true`.
+  - Store the cache record with `summary_text = ""` and `summary_pending = true`.
+  - The summarization phase MUST later attempt AI summarization to produce `summary_text`.
 - If the file source exists in the cache:
   - If both `size_bytes` and `mtime_ns` match the cached values, the file MUST be treated as unchanged and the AI MUST NOT be called.
-    - If `summary_pending` is true, the Knowledge Base MUST attempt summarization using the current file content.
-      - On success, the Knowledge Base MUST set `summary_text`, `content_hash`, `last_indexed_at`, and `summary_pending = false`.
-      - On failure, the Knowledge Base MUST leave the cache record unchanged.
+    - If `summary_pending` is true, the summarization phase MUST attempt summarization using the current file content.
   - Otherwise, the Knowledge Base MUST read the file content and compute `content_hash`.
     - The Knowledge Base MUST update the cached file metadata fields `size_bytes` and `mtime_ns` to the current values.
     - If `content_hash` differs from the cached value or `summary_pending` is true:
-      - The AI module summarization method MUST be called and `summary_text` MUST be updated on success.
-      - If summarization fails, `summary_pending` MUST be set to true, `content_hash` MUST be updated to the new value, and the previous `summary_text` MUST remain unchanged.
-      - If summarization succeeds, the Knowledge Base MUST set `summary_text`, `content_hash`, `last_indexed_at`, and `summary_pending = false`.
+      - The Knowledge Base MUST set `summary_pending = true` and update `content_hash` to the new value.
+      - The summarization phase MUST later attempt AI summarization and update `summary_text` on success.
     - If `content_hash` is unchanged and `summary_pending` is false, the AI MUST NOT be called and the Knowledge Base MUST only update the cached file metadata fields `size_bytes` and `mtime_ns`.
 
 ### URL source processing
@@ -117,9 +118,7 @@ If the URL source is new (i.e., its `source_id` is not present in the loaded cac
 - The Knowledge Base MUST set `fetch_status = "success"` and `last_fetched_at = now`.
 - The Knowledge Base MUST compute `content_hash`.
 - The Knowledge Base MUST immediately store the cache record with `summary_pending = true` and `summary_text = ""`. This ensures that if the process exits before or during summarization, the downloaded content is preserved and can be summarized later without re-fetching.
-- The Knowledge Base MUST attempt AI summarization to produce `summary_text`.
-  - On success, the Knowledge Base MUST set `summary_text` and `summary_pending = false` and persist the cache record.
-  - On failure, the Knowledge Base MUST leave `summary_pending = true` and the cache record as is.
+- The summarization phase MUST attempt AI summarization to produce `summary_text`.
 - Each URL record MUST store `next_check_at` and the Knowledge Base MUST set `next_check_at = now + kb.url_refresh_min_interval_seconds`.
 
 ### Existing URL source
@@ -139,19 +138,15 @@ If the server responds with HTTP 304:
 - The Knowledge Base MUST set `fetch_status = "not_modified"` and update `last_fetched_at`.
 - The Knowledge Base MUST NOT fetch URL content for this refresh.
 - The Knowledge Base MUST set `next_check_at = now + kb.url_refresh_min_interval_seconds`.
-- If `summary_pending` is true, the Knowledge Base MUST attempt summarization using cached content without issuing a network request.
-  - On success, the Knowledge Base MUST set `summary_text`, `content_hash`, `last_indexed_at`, and `summary_pending = false`.
-  - On failure or if cached content is missing, the Knowledge Base MUST leave the cache record unchanged.
+- If `summary_pending` is true and cached content is available, the summarization phase MUST attempt summarization without issuing a network request.
 
 If the server responds with HTTP 200:
 
 - The Knowledge Base MUST fetch content using the web fetching mechanism defined in `docs/module-knowledge-base.md` and write it to the URL content cache file for that URL.
 - The Knowledge Base MUST compute `content_hash` for the extracted content.
-- If the content is new or summarization is required, the Knowledge Base MUST call the AI module summarization method.
+- If the content is new or summarization is required, the Knowledge Base MUST set `summary_pending = true`.
   - Summarization is required when `content_hash` differs from the cached value, `summary_pending` is true, or `summary_text` is empty after trimming whitespace.
-  - Before calling the AI, if content has changed, the Knowledge Base MUST immediately update the cache record with the new `content_hash`, `summary_pending = true`, and updated fetch metadata (`etag`, `last_modified`, `fetch_status = "success"`, `last_fetched_at`), and persist the cache. This ensures the new content is acknowledged even if summarization fails.
-  - On success, the Knowledge Base MUST set `summary_text`, `content_hash`, `last_indexed_at`, and `summary_pending = false` and persist the cache.
-  - On failure, the Knowledge Base MUST leave `summary_pending = true`, MUST keep the previous `summary_text` (or empty string if new), and MUST set `next_check_at = now + kb.runtime_refresh_tick_seconds`.
+  - If content has changed, the Knowledge Base MUST immediately update the cache record with the new `content_hash`, `summary_pending = true`, and updated fetch metadata (`etag`, `last_modified`, `fetch_status = "success"`, `last_fetched_at`), and persist the cache. This ensures the new content is acknowledged even if summarization fails.
 - The Knowledge Base MUST update `etag` and `last_modified` when present, set `fetch_status = "success"`, update `last_fetched_at`, and set `next_check_at = now + kb.url_refresh_min_interval_seconds`.
 
 If an eligible URL check fails due to timeout, error, or unexpected HTTP status:
@@ -162,9 +157,7 @@ If an eligible URL check fails due to timeout, error, or unexpected HTTP status:
 
 When `summary_pending` is true for a URL and the URL is not eligible for refresh:
 
-- The Knowledge Base MUST attempt summarization using cached content without issuing conditional requests.
-- On success, the Knowledge Base MUST set `summary_text`, `content_hash`, `last_indexed_at`, and `summary_pending = false`.
-- On failure or if cached content is missing, the Knowledge Base MUST leave the cache record unchanged.
+- The summarization phase MUST attempt summarization using cached content without issuing conditional requests when cached content is available.
 
 ## Index generation
 

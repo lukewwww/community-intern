@@ -185,6 +185,9 @@ class KnowledgeBaseCacheManager:
         self._lock = lock
         self._runtime_task: Optional[asyncio.Task] = None
         self._stop_event = asyncio.Event()
+        self._persist_lock = asyncio.Lock()
+        self._download_semaphore = asyncio.Semaphore(max(1, int(self._config.url_download_concurrency)))
+        self._summary_semaphore = asyncio.Semaphore(max(1, int(self._config.summarization_concurrency)))
 
     async def build_index_incremental(self) -> None:
         async with self._lock:
@@ -263,6 +266,107 @@ class KnowledgeBaseCacheManager:
         index_entries = self._build_index_entries(cache)
         self._write_index(index_entries)
 
+    async def _persist_cache_and_index_async(self, cache: CacheState, now: datetime) -> None:
+        async with self._persist_lock:
+            self._persist_cache_and_index(cache, now)
+
+    async def _fetch_url_text(self, fetcher: WebFetcher, url: str, *, force_refresh: bool) -> str:
+        async with self._download_semaphore:
+            return await fetcher.fetch(url, force_refresh=force_refresh)
+
+    async def _conditional_request_limited(
+        self,
+        *,
+        url: str,
+        etag: Optional[str],
+        last_modified: Optional[str],
+    ) -> Tuple[int, Optional[str], Optional[str]]:
+        async with self._download_semaphore:
+            return await self._conditional_request(url=url, etag=etag, last_modified=last_modified)
+
+    async def _summarize_pending_sources(
+        self,
+        *,
+        cache: CacheState,
+        file_sources: Dict[str, Path],
+        now: datetime,
+    ) -> None:
+        tasks = []
+        fetcher = WebFetcher(self._config)
+        for source_id, record in cache.sources.items():
+            if not record.summary_pending:
+                continue
+            if record.source_type == "file" and record.file:
+                file_path = file_sources.get(record.file.rel_path)
+                if not file_path:
+                    continue
+                try:
+                    text = file_path.read_text(encoding="utf-8")
+                except UnicodeDecodeError:
+                    logger.warning("Skipping non-UTF8 knowledge base file. path=%s", file_path)
+                    continue
+                except OSError as e:
+                    logger.warning("Failed to read knowledge base file. path=%s error=%s", file_path, e)
+                    continue
+                content_hash = _hash_text(text)
+                tasks.append(
+                    asyncio.create_task(
+                        self._summarize_source(
+                            cache=cache,
+                            record=record,
+                            source_id=source_id,
+                            text=text,
+                            content_hash=content_hash,
+                            now=now,
+                        )
+                    )
+                )
+            elif record.source_type == "url" and record.url:
+                cached_text = fetcher.get_cached_content(record.url.url)
+                if not cached_text:
+                    continue
+                content_hash = _hash_text(cached_text)
+                tasks.append(
+                    asyncio.create_task(
+                        self._summarize_source(
+                            cache=cache,
+                            record=record,
+                            source_id=source_id,
+                            text=cached_text,
+                            content_hash=content_hash,
+                            now=now,
+                        )
+                    )
+                )
+        if tasks:
+            await asyncio.gather(*tasks)
+
+    async def _summarize_source(
+        self,
+        *,
+        cache: CacheState,
+        record: CacheRecord,
+        source_id: str,
+        text: str,
+        content_hash: str,
+        now: datetime,
+    ) -> None:
+        async with self._summary_semaphore:
+            try:
+                summary = await self._ai_client.summarize_for_kb_index(source_id=source_id, text=text)
+            except Exception:
+                logger.exception("Failed to summarize knowledge base source. source_id=%s", source_id)
+                return
+        async with self._persist_lock:
+            current = cache.sources.get(source_id)
+            if current is not record or not current.summary_pending:
+                return
+            current.summary_text = summary
+            current.content_hash = content_hash
+            current.last_indexed_at = _format_rfc3339(now)
+            current.summary_pending = False
+            self._persist_cache_and_index(cache, now)
+
     def _discover_file_sources(self) -> Dict[str, Path]:
         sources_dir = Path(self._config.sources_dir)
         if not sources_dir.exists():
@@ -302,31 +406,35 @@ class KnowledgeBaseCacheManager:
         for source_id in list(cache.sources.keys()):
             if source_id not in current_ids:
                 cache.sources.pop(source_id, None)
-                self._persist_cache_and_index(cache, now)
+                await self._persist_cache_and_index_async(cache, now)
 
         for rel_path, file_path in sorted(file_sources.items()):
-            changed = await self._process_file_source(
+            await self._process_file_source(
                 cache=cache,
                 rel_path=rel_path,
                 file_path=file_path,
                 now=now,
             )
-            if changed:
-                self._persist_cache_and_index(cache, now)
 
         async with WebFetcher(self._config) as fetcher:
+            tasks = []
             for url in sorted(url_sources.keys()):
                 record = cache.sources.get(url)
                 if record is None:
-                    changed = await self._create_url_source(
-                        cache=cache,
-                        url=url,
-                        now=now,
-                        fetcher=fetcher,
+                    tasks.append(
+                        asyncio.create_task(
+                            self._create_url_source(
+                                cache=cache,
+                                url=url,
+                                now=now,
+                                fetcher=fetcher,
+                            )
+                        )
                     )
-                    if changed:
-                        self._persist_cache_and_index(cache, now)
+            if tasks:
+                await asyncio.gather(*tasks)
         await self._refresh_urls(cache=cache, now=now)
+        await self._summarize_pending_sources(cache=cache, file_sources=file_sources, now=now)
 
     async def _process_file_source(
         self,
@@ -334,12 +442,12 @@ class KnowledgeBaseCacheManager:
         rel_path: str,
         file_path: Path,
         now: datetime,
-    ) -> bool:
+    ) -> None:
         try:
             stat = file_path.stat()
         except OSError as e:
             logger.warning("Failed to stat knowledge base file. path=%s error=%s", file_path, e)
-            return False
+            return
 
         record = cache.sources.get(rel_path)
         if record is None:
@@ -347,90 +455,52 @@ class KnowledgeBaseCacheManager:
                 text = file_path.read_text(encoding="utf-8")
             except UnicodeDecodeError:
                 logger.warning("Skipping non-UTF8 knowledge base file. path=%s", file_path)
-                return False
+                return
             except OSError as e:
                 logger.warning("Failed to read knowledge base file. path=%s error=%s", file_path, e)
-                return False
+                return
 
             content_hash = _hash_text(text)
-            try:
-                summary = await self._ai_client.summarize_for_kb_index(source_id=rel_path, text=text)
-            except Exception:
-                logger.exception("Failed to summarize knowledge base file source. path=%s", file_path)
-                cache.sources[rel_path] = CacheRecord(
-                    source_type="file",
-                    content_hash=content_hash,
-                    summary_text="",
-                    last_indexed_at=_format_rfc3339(now),
-                    summary_pending=True,
-                    file=FileMetadata(rel_path=rel_path, size_bytes=stat.st_size, mtime_ns=stat.st_mtime_ns),
-                )
-                return True
             cache.sources[rel_path] = CacheRecord(
                 source_type="file",
                 content_hash=content_hash,
-                summary_text=summary,
+                summary_text="",
                 last_indexed_at=_format_rfc3339(now),
-                summary_pending=False,
+                summary_pending=True,
                 file=FileMetadata(rel_path=rel_path, size_bytes=stat.st_size, mtime_ns=stat.st_mtime_ns),
             )
-            return True
+            await self._persist_cache_and_index_async(cache, now)
+            return
 
         if record.source_type != "file":
             logger.warning("Cache record type mismatch for file source. source_id=%s", rel_path)
             cache.sources.pop(rel_path, None)
-            return True
+            await self._persist_cache_and_index_async(cache, now)
+            return
 
         file_meta = record.file
         if not file_meta:
             file_meta = FileMetadata(rel_path=rel_path, size_bytes=stat.st_size, mtime_ns=stat.st_mtime_ns)
         if file_meta.size_bytes == stat.st_size and file_meta.mtime_ns == stat.st_mtime_ns:
-            if not record.summary_pending:
-                return False
-            try:
-                text = file_path.read_text(encoding="utf-8")
-            except UnicodeDecodeError:
-                logger.warning("Skipping non-UTF8 knowledge base file. path=%s", file_path)
-                return False
-            except OSError as e:
-                logger.warning("Failed to read knowledge base file. path=%s error=%s", file_path, e)
-                return False
-            content_hash = _hash_text(text)
-            try:
-                summary = await self._ai_client.summarize_for_kb_index(source_id=rel_path, text=text)
-            except Exception:
-                logger.exception("Failed to summarize knowledge base file source. path=%s", file_path)
-                return False
-            record.summary_text = summary
-            record.content_hash = content_hash
-            record.last_indexed_at = _format_rfc3339(now)
-            record.summary_pending = False
-            return True
+            return
 
         try:
             text = file_path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
             logger.warning("Skipping non-UTF8 knowledge base file. path=%s", file_path)
-            return False
+            return
         except OSError as e:
             logger.warning("Failed to read knowledge base file. path=%s error=%s", file_path, e)
-            return False
+            return
 
         content_hash = _hash_text(text)
         record.file = FileMetadata(rel_path=rel_path, size_bytes=stat.st_size, mtime_ns=stat.st_mtime_ns)
         if content_hash != record.content_hash or record.summary_pending:
-            try:
-                summary = await self._ai_client.summarize_for_kb_index(source_id=rel_path, text=text)
-            except Exception:
-                logger.exception("Failed to summarize knowledge base file source. path=%s", file_path)
-                record.content_hash = content_hash
-                record.summary_pending = True
-                return True
-            record.summary_text = summary
             record.content_hash = content_hash
-            record.last_indexed_at = _format_rfc3339(now)
-            record.summary_pending = False
-        return True
+            record.summary_pending = True
+            await self._persist_cache_and_index_async(cache, now)
+            return
+        await self._persist_cache_and_index_async(cache, now)
 
     async def _create_url_source(
         self,
@@ -439,7 +509,7 @@ class KnowledgeBaseCacheManager:
         now: datetime,
         fetcher: WebFetcher,
     ) -> bool:
-        text = await fetcher.fetch(url, force_refresh=True)
+        text = await self._fetch_url_text(fetcher, url, force_refresh=True)
         if not text:
             logger.warning("Failed to fetch knowledge base URL source content. url=%s", url)
             return False
@@ -464,49 +534,27 @@ class KnowledgeBaseCacheManager:
             ),
         )
         cache.sources[url] = record
-        self._persist_cache_and_index(cache, now)
-
-        try:
-            summary = await self._ai_client.summarize_for_kb_index(source_id=url, text=text)
-            record.summary_text = summary
-            record.summary_pending = False
-        except Exception:
-            logger.exception("Failed to summarize knowledge base URL source. url=%s", url)
-            # Record remains in pending state
-
+        await self._persist_cache_and_index_async(cache, now)
         return True
 
     async def _refresh_urls(self, cache: CacheState, now: datetime) -> bool:
-        url_records: list[Tuple[str, CacheRecord, datetime, bool]] = []
+        url_records: list[CacheRecord] = []
         for source_id, record in cache.sources.items():
             if record.source_type != "url" or not record.url:
                 continue
             if self._is_url_eligible(record, now):
-                try:
-                    next_check = _parse_rfc3339(record.url.next_check_at)
-                except Exception:
-                    next_check = now
-                url_records.append((source_id, record, next_check, True))
-            elif record.summary_pending:
-                try:
-                    next_check = _parse_rfc3339(record.url.next_check_at)
-                except Exception:
-                    next_check = now
-                url_records.append((source_id, record, next_check, False))
+                url_records.append(record)
 
-        url_records.sort(key=lambda item: item[2])
+        if not url_records:
+            return False
 
-        changed = False
         async with WebFetcher(self._config) as fetcher:
-            for source_id, record, _, should_check in url_records:
-                if not should_check:
-                    refreshed = await self._summarize_cached_only(record=record, now=now, fetcher=fetcher)
-                else:
-                    refreshed = await self._refresh_single_url(cache=cache, record=record, now=now, fetcher=fetcher)
-                if refreshed:
-                    self._persist_cache_and_index(cache, now)
-                    changed = True
-        return changed
+            tasks = [
+                asyncio.create_task(self._refresh_single_url(cache=cache, record=record, now=now, fetcher=fetcher))
+                for record in url_records
+            ]
+            results = await asyncio.gather(*tasks)
+        return any(results)
 
     def _is_url_eligible(self, record: CacheRecord, now: datetime) -> bool:
         if not record.url:
@@ -524,19 +572,28 @@ class KnowledgeBaseCacheManager:
             return False
         url_meta = record.url
         try:
-            status, etag, last_modified = await self._conditional_request(
+            status, etag, last_modified = await self._conditional_request_limited(
                 url=url_meta.url,
                 etag=url_meta.etag,
                 last_modified=url_meta.last_modified,
             )
         except asyncio.TimeoutError:
-            return self._mark_url_failure(record, "timeout", now)
+            if self._mark_url_failure(record, "timeout", now):
+                await self._persist_cache_and_index_async(cache, now)
+                return True
+            return False
         except aiohttp.ClientError as e:
             logger.warning("URL refresh request failed. url=%s error=%s", url_meta.url, e)
-            return self._mark_url_failure(record, "error", now)
+            if self._mark_url_failure(record, "error", now):
+                await self._persist_cache_and_index_async(cache, now)
+                return True
+            return False
         except Exception:
             logger.exception("Unexpected URL refresh error. url=%s", url_meta.url)
-            return self._mark_url_failure(record, "error", now)
+            if self._mark_url_failure(record, "error", now):
+                await self._persist_cache_and_index_async(cache, now)
+                return True
+            return False
 
         if status == 304:
             url_meta.fetch_status = "not_modified"
@@ -544,31 +601,23 @@ class KnowledgeBaseCacheManager:
             url_meta.next_check_at = _format_rfc3339(
                 now + timedelta(seconds=self._config.url_refresh_min_interval_seconds)
             )
-            if record.summary_pending:
-                cached_text = fetcher.get_cached_content(url_meta.url)
-                if cached_text:
-                    try:
-                        summary = await self._ai_client.summarize_for_kb_index(
-                            source_id=url_meta.url,
-                            text=cached_text,
-                        )
-                    except Exception:
-                        logger.exception("Failed to summarize cached URL content. url=%s", url_meta.url)
-                    else:
-                        record.summary_text = summary
-                        record.content_hash = _hash_text(cached_text)
-                        record.last_indexed_at = _format_rfc3339(now)
-                        record.summary_pending = False
+            await self._persist_cache_and_index_async(cache, now)
             return True
 
         if status != 200:
             logger.warning("Unexpected URL refresh status. url=%s status=%s", url_meta.url, status)
-            return self._mark_url_failure(record, "error", now)
+            if self._mark_url_failure(record, "error", now):
+                await self._persist_cache_and_index_async(cache, now)
+                return True
+            return False
 
-        text = await fetcher.fetch(url_meta.url, force_refresh=True)
+        text = await self._fetch_url_text(fetcher, url_meta.url, force_refresh=True)
         if not text:
             logger.warning("Failed to fetch knowledge base URL source content. url=%s", url_meta.url)
-            return self._mark_url_failure(record, "error", now)
+            if self._mark_url_failure(record, "error", now):
+                await self._persist_cache_and_index_async(cache, now)
+                return True
+            return False
 
         content_hash = _hash_text(text)
 
@@ -585,41 +634,9 @@ class KnowledgeBaseCacheManager:
         if should_summarize:
             record.content_hash = content_hash
             record.summary_pending = True
-            # Save intermediate state: new content downloaded, summary pending.
-            self._persist_cache_and_index(cache, now)
-
-            try:
-                summary = await self._ai_client.summarize_for_kb_index(source_id=url_meta.url, text=text)
-                record.summary_text = summary
-                record.summary_pending = False
-            except Exception:
-                logger.exception("Failed to summarize knowledge base URL source. url=%s", url_meta.url)
-                # Retry sooner on summarization failure?
-                # The original logic set next_check_at to runtime_refresh_tick_seconds here.
-                url_meta.next_check_at = _format_rfc3339(
-                    now + timedelta(seconds=self._config.runtime_refresh_tick_seconds)
-                )
-
-        return True
-
-    async def _summarize_cached_only(self, record: CacheRecord, now: datetime, fetcher: WebFetcher) -> bool:
-        if not record.url or not record.summary_pending:
-            return False
-        cached_text = fetcher.get_cached_content(record.url.url)
-        if not cached_text:
-            return False
-        try:
-            summary = await self._ai_client.summarize_for_kb_index(
-                source_id=record.url.url,
-                text=cached_text,
-            )
-        except Exception:
-            logger.exception("Failed to summarize cached URL content. url=%s", record.url.url)
-            return False
-        record.summary_text = summary
-        record.content_hash = _hash_text(cached_text)
-        record.last_indexed_at = _format_rfc3339(now)
-        record.summary_pending = False
+        else:
+            record.content_hash = content_hash
+        await self._persist_cache_and_index_async(cache, now)
         return True
 
     async def _conditional_request(
