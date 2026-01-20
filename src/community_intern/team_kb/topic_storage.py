@@ -114,11 +114,16 @@ class TopicStorage:
             return ""
         return self._index_path.read_text(encoding="utf-8")
 
-    def save_index(self, entries: list[tuple[str, str]]) -> None:
+    def save_index(self, entries: list[tuple[str, str]], *, source_id_prefix: str = "") -> None:
         self.ensure_dirs()
         lines = []
-        for filename, description in entries:
-            lines.append(filename)
+        for source_id, description in entries:
+            identifier = source_id.strip()
+            prefix = source_id_prefix.strip()
+            if prefix and not identifier.startswith(prefix):
+                identifier = f"{prefix}{identifier}"
+
+            lines.append(identifier)
             lines.append(description)
             lines.append("")
         text = "\n".join(lines).strip() + "\n"

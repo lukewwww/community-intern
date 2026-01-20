@@ -20,8 +20,14 @@ T = TypeVar("T", bound=BaseModel)
 def _append_selected_links(reply_text: str, *, selected_source_ids: list[str]) -> str:
     links = []
     for source_id in selected_source_ids:
-        if source_id.startswith(("http://", "https://")):
-            links.append(source_id)
+        raw = source_id.strip()
+        if raw.startswith(("http://", "https://")):
+            links.append(raw)
+            continue
+        if raw.startswith("kb:"):
+            inner = raw[len("kb:") :].strip()
+            if inner.startswith(("http://", "https://")):
+                links.append(inner)
 
     if not links:
         return reply_text
@@ -114,8 +120,8 @@ class AIClientImpl(AIClient):
         *,
         system_prompt: str,
         user_content: str,
-        response_model: Optional[Type[T]] = None,
-    ) -> str | T:
+        response_model: Type[T],
+    ) -> T:
         """
         Invoke the LLM with the given prompts.
 
@@ -125,27 +131,22 @@ class AIClientImpl(AIClient):
         Args:
             system_prompt: The system prompt to send to the LLM
             user_content: The user message content
-            response_model: Optional Pydantic model for structured output
+            response_model: Pydantic model for structured output
 
         Returns:
-            If response_model is None: plain text response (str)
-            If response_model is provided: validated instance of the model
+            Validated instance of the model.
         """
         messages = [
             SystemMessage(content=system_prompt),
             HumanMessage(content=user_content),
         ]
 
-        if response_model is not None:
-            structured_llm = self._llm.with_structured_output(response_model)
-            result = await asyncio.wait_for(
-                structured_llm.ainvoke(messages),
-                timeout=self._config.llm_timeout_seconds,
-            )
-            return result
-        else:
-            response = await asyncio.wait_for(
-                self._llm.ainvoke(messages),
-                timeout=self._config.llm_timeout_seconds,
-            )
-            return response.content.strip()
+        structured_llm = self._llm.with_structured_output(
+            response_model,
+            method=self._config.structured_output_method,
+        )
+        result = await asyncio.wait_for(
+            structured_llm.ainvoke(messages),
+            timeout=self._config.llm_timeout_seconds,
+        )
+        return result

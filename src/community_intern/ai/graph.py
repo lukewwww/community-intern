@@ -71,7 +71,10 @@ async def node_gating(state: GraphState, *, llm: "ChatOpenAI") -> Dict[str, Any]
 
     last_msg = conversation.messages[-1].text if conversation.messages else ""
 
-    structured_llm = llm.with_structured_output(LLMGateDecision)
+    structured_llm = llm.with_structured_output(
+        LLMGateDecision,
+        method=config.structured_output_method,
+    )
 
     messages = [
         SystemMessage(
@@ -108,7 +111,10 @@ async def node_selection(state: GraphState, *, llm: "ChatOpenAI") -> Dict[str, A
         logger.exception("Failed to load knowledge base index.")
         return {"selected_source_ids": [], "should_reply": False}
 
-    structured_llm = llm.with_structured_output(LLMSelectionResult)
+    structured_llm = llm.with_structured_output(
+        LLMSelectionResult,
+        method=config.structured_output_method,
+    )
 
     messages = [
         SystemMessage(
@@ -157,7 +163,10 @@ async def node_generation(state: GraphState, *, llm: "ChatOpenAI") -> Dict[str, 
 
     sources_text = "\n\n".join([f"Source: {s.source_id}\nContent:\n{s.text}" for s in loaded])
 
-    structured_llm = llm.with_structured_output(LLMGenerationResult)
+    structured_llm = llm.with_structured_output(
+        LLMGenerationResult,
+        method=config.structured_output_method,
+    )
 
     messages = [
         SystemMessage(
@@ -194,7 +203,10 @@ async def node_verification(state: GraphState, *, llm: "ChatOpenAI") -> Dict[str
 
     sources_text = "\n\n".join([f"Source: {s.source_id}\nContent:\n{s.text}" for s in loaded])
 
-    structured_llm = llm.with_structured_output(LLMVerificationResult)
+    structured_llm = llm.with_structured_output(
+        LLMVerificationResult,
+        method=config.structured_output_method,
+    )
 
     messages = [
         SystemMessage(

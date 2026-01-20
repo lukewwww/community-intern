@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, Iterable, Optional, Tuple
 
+from community_intern.ai.interfaces import LLMTextResult
 from community_intern.ai.interfaces import AIClient
 from community_intern.config.models import KnowledgeBaseSettings
 from community_intern.kb.cache_io import (
@@ -24,6 +25,8 @@ from community_intern.kb.cache_utils import format_rfc3339, hash_text, parse_rfc
 from community_intern.kb.web_fetcher import WebFetcher
 
 logger = logging.getLogger(__name__)
+
+KB_SOURCE_ID_PREFIX = "kb:"
 
 
 def _compose_system_prompt(base_prompt: str, project_introduction: str) -> str:
@@ -215,10 +218,12 @@ class KnowledgeBaseCacheManager:
                     self._config.summarization_prompt,
                     self._ai_client.project_introduction,
                 )
-                summary = await self._ai_client.invoke_llm(
+                result = await self._ai_client.invoke_llm(
                     system_prompt=system_prompt,
                     user_content=text,
+                    response_model=LLMTextResult,
                 )
+                summary = result.text.strip()
             except Exception:
                 logger.exception("Failed to summarize knowledge base source. source_id=%s", source_id)
                 return
@@ -284,7 +289,7 @@ class KnowledgeBaseCacheManager:
 
         entries = []
         for source_id, summary in sorted(file_entries, key=lambda item: item[0]):
-            entries.append(f"{source_id}\n{summary}".strip())
+            entries.append(f"{KB_SOURCE_ID_PREFIX}{source_id}\n{summary}".strip())
         for source_id, summary in sorted(url_entries, key=lambda item: item[0]):
-            entries.append(f"{source_id}\n{summary}".strip())
+            entries.append(f"{KB_SOURCE_ID_PREFIX}{source_id}\n{summary}".strip())
         return entries

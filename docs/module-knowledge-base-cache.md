@@ -212,7 +212,7 @@ URL records MUST additionally contain a `url` object with:
 - For file sources, `source_id` MUST be the file path relative to `kb.sources_dir`.
 - For URL sources, `source_id` MUST be the full URL.
 
-The `source_id` string MUST be used as the identifier line in `index.txt`.
+When generating `index.txt`, the Knowledge Base MUST namespace the identifier line as `kb:<source_id>`.
 
 If a file is renamed or moved within `kb.sources_dir`, its relative path changes and the Knowledge Base MUST treat it as a deletion of the old `source_id` and an addition of a new `source_id`.
 

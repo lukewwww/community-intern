@@ -1,12 +1,18 @@
 from __future__ import annotations
 
-from typing import Optional, Type, TypeVar
+from typing import Literal, Optional, Type, TypeVar
 
 from pydantic import BaseModel, ConfigDict
 
 from community_intern.core.models import AIResult, Conversation, RequestContext
 
 T = TypeVar("T", bound=BaseModel)
+
+
+class LLMTextResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    text: str
 
 
 class AIClient:
@@ -24,8 +30,8 @@ class AIClient:
         *,
         system_prompt: str,
         user_content: str,
-        response_model: Optional[Type[T]] = None,
-    ) -> str | T:
+        response_model: Type[T],
+    ) -> T:
         """
         Invoke the LLM with the given prompts.
 
@@ -35,12 +41,11 @@ class AIClient:
         Args:
             system_prompt: The system prompt to send to the LLM
             user_content: The user message content
-            response_model: Optional Pydantic model for structured output. If provided,
-                           the response is validated and returned as an instance of this model.
+            response_model: Pydantic model for structured output. The response is validated
+                            and returned as an instance of this model.
 
         Returns:
-            If response_model is None: plain text response (str)
-            If response_model is provided: validated instance of the model
+            Validated instance of the model.
         """
         raise NotImplementedError
 
@@ -54,6 +59,7 @@ class AIConfig(BaseModel):
     llm_api_key: str
     llm_model: str
     vram_limit: int
+    structured_output_method: Literal["json_schema", "function_calling"] = "json_schema"
 
     # Timeouts and retries
     graph_timeout_seconds: float

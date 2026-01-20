@@ -53,3 +53,14 @@ Related contract types:
 
 - `src/community_intern/ai/interfaces.py` (`AIConfig`)
 - `src/community_intern/config/models.py` (`AppConfig`, `DiscordSettings`, `KnowledgeBaseSettings`)
+
+## AI structured output method
+
+`ai.structured_output_method` controls how the application enforces structured outputs when using `with_structured_output()`.
+
+Allowed values:
+
+- `json_schema`: Use the provider JSON schema structured output mechanism.
+- `function_calling`: Force tool calling and parse the tool call arguments.
+
+Use `function_calling` when the selected model does not support native JSON schema structured output.

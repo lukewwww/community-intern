@@ -8,12 +8,13 @@ from typing import Sequence
 from community_intern.ai.interfaces import AIClient
 from community_intern.config.models import KnowledgeBaseSettings
 from community_intern.kb.interfaces import IndexEntry, SourceContent
-from community_intern.kb.cache_manager import KnowledgeBaseCacheManager
+from community_intern.kb.cache_manager import KnowledgeBaseCacheManager, KB_SOURCE_ID_PREFIX
 from community_intern.kb.web_fetcher import WebFetcher
 from community_intern.team_kb.topic_storage import TopicStorage
 
 logger = logging.getLogger(__name__)
 
+TEAM_SOURCE_ID_PREFIX = "team:"
 
 class FileSystemKnowledgeBase:
     def __init__(self, config: KnowledgeBaseSettings, ai_client: AIClient):
@@ -22,6 +23,15 @@ class FileSystemKnowledgeBase:
         self._index_lock = asyncio.Lock()
         self._cache_manager = KnowledgeBaseCacheManager(config=config, ai_client=ai_client, lock=self._index_lock)
         self._topic_storage = TopicStorage(config.team_topics_dir, config.team_index_path)
+
+    def _extract_team_topic_filename(self, source_id: str) -> str:
+        raw = source_id.strip()
+        if not raw.startswith(TEAM_SOURCE_ID_PREFIX):
+            raise ValueError(f"Not a team topic source id: {source_id}")
+        filename = raw[len(TEAM_SOURCE_ID_PREFIX) :].strip()
+        if not filename:
+            raise ValueError(f"Empty team topic filename in source id: {source_id}")
+        return filename
 
     def _normalize_file_source_id(self, *, source_id: str, sources_dir: Path) -> str:
         """
@@ -102,25 +112,35 @@ class FileSystemKnowledgeBase:
         """Load full source content for a file path or URL identifier."""
         sources_dir = Path(self.config.sources_dir)
         team_topics_dir = Path(self.config.team_topics_dir)
+        raw = source_id.strip()
+
+        if raw.startswith(TEAM_SOURCE_ID_PREFIX):
+            filename = self._extract_team_topic_filename(raw)
+            team_topic_path = team_topics_dir / filename
+            if not team_topic_path.exists() or not team_topic_path.is_file():
+                raise FileNotFoundError(f"Team topic source not found: {source_id}")
+            text = self._topic_storage.load_topic_as_text(filename)
+            if not text.strip():
+                raise ValueError(f"Team topic source is empty: {source_id}")
+            return SourceContent(source_id=source_id, text=text)
+
+        if not raw.startswith(KB_SOURCE_ID_PREFIX):
+            raise ValueError(
+                f"Invalid source_id (missing prefix). Expected '{KB_SOURCE_ID_PREFIX}' or '{TEAM_SOURCE_ID_PREFIX}'. source_id={source_id}"
+            )
+
+        raw = raw[len(KB_SOURCE_ID_PREFIX) :].strip()
 
         # Check if it's a URL
-        if source_id.startswith(("http://", "https://")):
+        if raw.startswith(("http://", "https://")):
             async with WebFetcher(self.config) as fetcher:
-                text = await fetcher.fetch(source_id)
+                text = await fetcher.fetch(raw)
                 if not text.strip():
-                    raise RuntimeError(f"Failed to load URL source content: {source_id}")
+                    raise RuntimeError(f"Failed to load URL source content: {raw}")
                 return SourceContent(source_id=source_id, text=text)
 
-        # Check if it's a team topic file
-        if source_id.endswith(".json"):
-            team_topic_path = team_topics_dir / source_id
-            if team_topic_path.exists() and team_topic_path.is_file():
-                text = self._topic_storage.load_topic_as_text(source_id)
-                if text.strip():
-                    return SourceContent(source_id=source_id, text=text)
-
         try:
-            raw_path = Path(source_id.strip())
+            raw_path = Path(raw)
             sources_dir_resolved = sources_dir.resolve()
 
             if raw_path.is_absolute():
@@ -137,7 +157,7 @@ class FileSystemKnowledgeBase:
                     raise ValueError(f"File source is outside sources_dir: {source_id}")
                 file_path = sources_dir_resolved / rel
             else:
-                normalized_id = self._normalize_file_source_id(source_id=source_id, sources_dir=sources_dir)
+                normalized_id = self._normalize_file_source_id(source_id=raw, sources_dir=sources_dir)
                 file_path = sources_dir / Path(normalized_id)
 
             if not file_path.exists() or not file_path.is_file():
@@ -153,4 +173,3 @@ class FileSystemKnowledgeBase:
         except OSError as e:
             logger.warning("OS error while reading KB file source. source_id=%s error=%s", source_id, e)
             raise
-

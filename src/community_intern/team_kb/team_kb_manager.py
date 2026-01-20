@@ -9,6 +9,7 @@ from typing import List
 from pydantic import BaseModel, Field
 
 from community_intern.ai.interfaces import AIClient
+from community_intern.ai.interfaces import LLMTextResult
 from community_intern.config.models import KnowledgeBaseSettings
 from community_intern.kb.cache_io import atomic_write_json
 from community_intern.kb.cache_models import CacheRecord, CacheState, SchemaVersion
@@ -19,13 +20,20 @@ from community_intern.team_kb.topic_storage import TopicStorage, qa_pair_to_dict
 
 logger = logging.getLogger(__name__)
 
+TEAM_SOURCE_ID_PREFIX = "team:"
+
 
 # --- Pydantic Models for Structured LLM Output ---
 
 
 class ClassificationResult(BaseModel):
+    skip: bool = Field(
+        default=False,
+        description="If true, the Q&A pair lacks sufficient information and should not be added to any topic",
+    )
     topic_name: str = Field(
-        description="Topic identifier (e.g., 'node-startup-issues')"
+        default="",
+        description="Topic identifier (e.g., 'node-startup-issues'). Empty when skip is true.",
     )
 
 
@@ -105,8 +113,32 @@ class TeamKnowledgeManager:
             lines.append(f"{prefix} {turn.content}")
         return "\n".join(lines)
 
+    def _strip_team_prefix_from_index_text(self, index_text: str) -> str:
+        """
+        Team index on disk uses namespaced identifiers (team:<topic_filename>).
+
+        For topic classification prompts, we present identifiers without the prefix to keep
+        topic naming stable (topic_name remains "<slug>" or "<slug>.json").
+        """
+        text = index_text.strip()
+        if not text:
+            return ""
+
+        chunks = text.split("\n\n")
+        rewritten = []
+        for chunk in chunks:
+            lines = chunk.split("\n")
+            if not lines:
+                continue
+            first = lines[0].strip()
+            if first.startswith(TEAM_SOURCE_ID_PREFIX):
+                lines[0] = first[len(TEAM_SOURCE_ID_PREFIX) :].strip()
+            rewritten.append("\n".join(lines).strip())
+
+        return "\n\n".join([c for c in rewritten if c.strip()]).strip()
+
     async def _classify_and_integrate(self, qa_pair: QAPair) -> None:
-        index_text = self._topic_storage.load_index_text()
+        index_text = self._strip_team_prefix_from_index_text(self._topic_storage.load_index_text())
 
         qa_text = self._format_qa_pair_for_llm(qa_pair)
         user_content = f"Current index:\n{index_text}\n\n---\n\nNew Q&A pair:\n{qa_text}"
@@ -121,10 +153,26 @@ class TeamKnowledgeManager:
                 user_content=user_content,
                 response_model=ClassificationResult,
             )
-            topic_name = result.topic_name
         except Exception:
-            logger.exception("LLM classification failed. qa_id=%s", qa_pair.id)
-            topic_name = "general-qa"
+            logger.exception(
+                "LLM classification failed, skipping integration. qa_id=%s", qa_pair.id
+            )
+            return
+
+        if result.skip:
+            logger.info(
+                "Skipped QA pair during classification (insufficient information). qa_id=%s",
+                qa_pair.id,
+            )
+            return
+
+        topic_name = result.topic_name
+        if not topic_name:
+            logger.warning(
+                "Classification returned empty topic_name without skip=true. qa_id=%s",
+                qa_pair.id,
+            )
+            return
 
         logger.debug(
             "Topic classification result. qa_id=%s topic_name=%s",
@@ -226,10 +274,12 @@ class TeamKnowledgeManager:
                     self._config.team_summarization_prompt,
                     self._ai_client.project_introduction,
                 )
-                description = await self._ai_client.invoke_llm(
+                result = await self._ai_client.invoke_llm(
                     system_prompt=system_prompt,
                     user_content=topic_text,
+                    response_model=LLMTextResult,
                 )
+                description = result.text.strip()
             except Exception:
                 logger.warning("Failed to summarize topic for index. filename=%s", filename)
 
@@ -258,7 +308,7 @@ class TeamKnowledgeManager:
         for source_id, record in sorted(cache.sources.items()):
             if record.summary_text.strip():
                 entries.append((source_id, record.summary_text))
-        self._topic_storage.save_index(entries)
+        self._topic_storage.save_index(entries, source_id_prefix=TEAM_SOURCE_ID_PREFIX)
 
     def _load_cache(self) -> CacheState:
         if not self._cache_path.exists():

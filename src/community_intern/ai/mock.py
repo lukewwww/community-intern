@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, Type, TypeVar
+from typing import Type, TypeVar
 
 from pydantic import BaseModel
 
@@ -44,9 +44,7 @@ class MockAIClient:
         *,
         system_prompt: str,
         user_content: str,
-        response_model: Optional[Type[T]] = None,
-    ) -> str | T:
+        response_model: Type[T],
+    ) -> T:
         """Mock LLM invocation that returns dummy responses."""
-        if response_model is not None:
-            return response_model.model_construct()
-        return "Mock LLM response"
+        return response_model.model_construct()

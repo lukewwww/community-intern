@@ -64,9 +64,9 @@ The Knowledge Base maintains two index files:
 Both indices follow the same format. Each entry MUST be:
 
 - A single line containing the source identifier:
-  - For files: the file path relative to the knowledge base folder
-  - For web sources: the full URL
-  - For team topics: the topic file name
+  - For files: `kb:<rel_path>` where `<rel_path>` is the file path relative to the knowledge base folder
+  - For web sources: `kb:<url>` where `<url>` is the full URL
+  - For team topics: `team:<topic_filename>` (for example `team:get-test-tokens.json`)
 - Followed by one or more lines of free-text description for source selection
 
 Entries MUST be separated by at least one blank line.
@@ -76,6 +76,13 @@ See the example index file: `examples/kb_index.txt`.
 Notes:
 - The identifier line must be stable across runs for citation stability.
 - Keep descriptions short and focused on when the source is relevant.
+
+### Source identifier namespaces
+
+To avoid collisions between different source types and to keep loading logic unambiguous, both index artifacts use explicit namespaces:
+
+- Knowledge base sources: `kb:...`
+- Team topic sources: `team:...`
 
 ## Public interfaces
 
@@ -128,7 +135,7 @@ The Knowledge Base does not decide which sources are relevant.
 
 At runtime, the AI module:
 
-- Loads both index artifacts (`index.txt` and `index-team.txt`) as plain text from the Knowledge Base.
+- Loads both index artifacts (`index.txt` and `index-team.txt`) as plain text from the Knowledge Base and receives a combined index by concatenating them.
 - Sends the combined index text and the user query to the LLM to select a relevant list of source identifiers.
 - Requests full content for those selected identifiers from the Knowledge Base.
 

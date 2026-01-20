@@ -34,11 +34,11 @@ The main entry point for the bot's conversational capabilities.
 
 A generic interface for single-step LLM operations that other modules can use.
 
-- **Input**: `system_prompt`, `user_content`, optional `response_model` (Pydantic model)
-- **Output**: Plain text `str` or validated Pydantic model instance
+- **Input**: `system_prompt`, `user_content`, `response_model` (Pydantic model)
+- **Output**: Validated Pydantic model instance
 - **Behavior**:
   - Passes the system prompt directly to the LLM without modification
-  - If `response_model` is provided, uses `with_structured_output` for automatic JSON schema and validation
+  - Uses `with_structured_output` for automatic JSON schema and validation
   - Uses shared `ChatCrynux` instance with configured timeouts and retries
 
 Callers are responsible for appending `project_introduction` to their system prompts if needed. The `AIClient.project_introduction` property provides access to the configured value.
@@ -65,8 +65,10 @@ Instead, retrieval is a two-stage, index-driven workflow:
 This design makes the retrieval decision explicit and reviewable, and it avoids brittle query-to-embedding behavior for short or ambiguous questions.
 
 Source ID rules:
-- For file sources, `source_id` is a path relative to `kb.sources_dir`.
-- For web sources, `source_id` is the URL.
+- For knowledge base sources, `source_id` is namespaced as `kb:<identifier>`.
+  - For file sources: `kb:<rel_path>` where `<rel_path>` is a path relative to `kb.sources_dir`.
+  - For web sources: `kb:<url>` where `<url>` is the full URL.
+- For team topic sources, `source_id` is namespaced as `team:<topic_filename>` (for example `team:get-test-tokens.json`).
 
 #### High-level Node Graph
 
@@ -141,9 +143,9 @@ The `invoke_llm` interface bypasses the LangGraph workflow and uses a shared `Ch
 - Configured with the same LLM settings as the graph (endpoint, model, timeouts, retries)
 - Reused across all `invoke_llm` calls
 
-**Output modes**:
-- **Plain text**: When `response_model` is `None`, returns `str` content
-- **Structured**: When `response_model` is a Pydantic model, uses `with_structured_output` for automatic JSON schema generation and validation
+**Output**:
+- **JSON-only**: Callers MUST provide a Pydantic model and the LLM MUST return JSON that validates against the model.
+- **Text via JSON**: For single string outputs, callers SHOULD use `LLMTextResult` with a single `text` field.
 
 ## Link Inclusion
 
@@ -193,7 +195,7 @@ The configuration provides task-focused prompt content only. The runtime assembl
 
 - For the graph workflow (`generate_reply`): `project_introduction` is appended to the system prompt for gating, source selection, answer generation, and verification.
 - For simple LLM calls (`invoke_llm`): Callers are responsible for appending `project_introduction` to their prompts using `ai_client.project_introduction`.
-- Output format requirements for gating, selection, and verification are enforced in code and are not configurable.
+- All LLM calls MUST use JSON-only structured outputs. Output format requirements are enforced in code and are not configurable.
 
 ## Observability
 

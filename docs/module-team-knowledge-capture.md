@@ -92,8 +92,9 @@ LLM responses are kept minimal to reduce token usage and improve reliability:
 
 **Classification**:
 - Pydantic model: `ClassificationResult`
-- Returns: `topic_name` (str)
-- The topic identifier (e.g., "node-startup-issues")
+- Returns: `skip` (bool), `topic_name` (str)
+- `skip`: if true, the Q&A pair lacks sufficient information and should not be added to any topic file
+- `topic_name`: the topic identifier (e.g., "node-startup-issues"); empty when skip is true
 - The system determines if a topic is new by checking whether the file exists
 
 **Integration**:
@@ -271,7 +272,7 @@ and cross-chain transfers between supported L2 networks.
 ```
 
 Format rules:
-- First line: topic file name (identifier)
+- First line: `team:<topic_filename>` identifier
 - Following lines: description of what topics/questions the file covers
 - Blank line between entries
 - File-level granularity (describes the file as a whole, not individual Q&A pairs)
@@ -296,18 +297,37 @@ The classification prompt receives:
 - The new Q&A pair to classify
 
 Expected output (JSON):
-- `topic_name`: the topic identifier (e.g., "node-startup-issues")
+- `skip`: boolean, true if the Q&A pair should not be indexed
+- `topic_name`: the topic identifier (e.g., "node-startup-issues"); empty when skip is true
 
-Example output:
+Example outputs:
+
+Q&A pair with sufficient information:
 ```json
 {
+  "skip": false,
   "topic_name": "node-startup-issues"
+}
+```
+
+Q&A pair lacking sufficient information:
+```json
+{
+  "skip": true,
+  "topic_name": ""
 }
 ```
 
 The system checks if `{topic_name}.json` exists to determine whether this is a new topic.
 
-Fallback behavior: If uncertain, create a new topic file.
+**Skip behavior**: The LLM should set `skip: true` when the text conversation is not self-contained or cannot guide future answers. Common cases include:
+- The question uses vague references like "this error" or "this issue" without describing what it is
+- The answer cannot be understood without additional context not present in the text
+- Greetings, casual chat, or off-topic exchanges without technical content
+
+Skipped Q&A pairs remain in the raw archive for audit purposes but are not added to topic files.
+
+**Fallback behavior**: If classification fails due to LLM errors, the Q&A pair is skipped (not added to any topic file). The raw archive preserves all captures regardless of classification outcome.
 
 ### LLM Integration Prompt
 
@@ -376,7 +396,8 @@ kb:
 
   team_classification_prompt: |
     You are a topic classifier for a team knowledge base.
-    Given the current index of topics and a new Q&A pair, decide whether to add it to an existing topic or create a new one.
+    Given the current index of topics and a new Q&A pair, decide whether to add it to an existing topic, create a new one, or skip it entirely.
+    First, evaluate whether the Q&A pair contains enough useful information...
     ...
 
   team_integration_prompt: |
@@ -484,9 +505,10 @@ CLI Command
 
 | Error Type | Handling |
 |------------|----------|
-| LLM call failure | Log, retry with backoff; on max retries, store to raw but skip indexing |
+| LLM call failure | Log and skip indexing; Q&A pair remains in raw archive |
 | File I/O failure | Log and propagate; no partial writes |
-| Classification ambiguity | Default to creating new topic file |
+| Classification returns skip | Log and skip indexing; Q&A pair remains in raw archive |
+| Empty topic_name without skip | Log warning and skip indexing |
 | Malformed raw file entry | Log warning, skip entry during regeneration |
 
 ---
@@ -508,6 +530,7 @@ The topic-indexed library integrates with the main Knowledge Base module (see `m
 
 - The KB module loads `index-team.txt` alongside its main `index.txt`
 - Both indices are combined and sent to the LLM for source selection
+- Team topic identifiers are namespaced as `team:<topic_filename>` to avoid collisions with normal file sources
 - When generating answers, team knowledge takes precedence over static documentation
 - The KB module can load topic files from `topics/` just like other KB sources
 
