@@ -140,7 +140,7 @@ class TopicStorage:
         self.ensure_dirs()
         file_path = self._topics_dir / filename
         atomic_write_text(file_path, format_topic_block(first_qa))
-        logger.info("Created new topic file. filename=%s", filename)
+        logger.debug("Created topic file. filename=%s", filename)
 
     def topic_exists(self, filename: str) -> bool:
         file_path = self._topics_dir / filename

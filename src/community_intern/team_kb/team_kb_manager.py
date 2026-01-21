@@ -200,7 +200,7 @@ class TeamKnowledgeManager:
         self._topic_storage.create_topic(filename, qa_pair)
         await self._topic_indexer.notify_changed(filename)
 
-        logger.info("Created new topic. filename=%s", filename)
+        logger.info("Updated team knowledge index for new topic file. filename=%s", filename)
 
     async def _integrate_into_topic(self, qa_pair: QAPair, filename: str) -> None:
         existing_text = self._topic_storage.load_topic_as_text(filename).strip()
