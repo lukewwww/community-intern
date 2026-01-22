@@ -20,23 +20,60 @@ class UrlLinksProvider:
     def __init__(self, *, config: KnowledgeBaseSettings) -> None:
         self._config = config
         self._urls: Dict[str, str] = {}
+        self._cached_sources: Dict[str, SourceType] = {}
+        self._links_file_last: Tuple[int, int] | None = None
         self._download_semaphore = asyncio.Semaphore(max(1, int(self._config.url_download_concurrency)))
 
     async def discover(self, *, now: datetime) -> Dict[str, SourceType]:
         _ = now
-        self._urls = {}
         links_file = Path(self._config.links_file_path)
         if not links_file.exists():
-            logger.debug("UrlLinksProvider discover: links file missing. path=%s", links_file)
-            return {}
-        try:
-            content = links_file.read_text(encoding="utf-8")
-        except Exception as e:
-            logger.warning("Failed to read links file. path=%s error=%s", links_file, e)
+            if self._links_file_last is not None or self._cached_sources:
+                logger.info("UrlLinksProvider discover: links file missing; clearing cached URLs. path=%s", links_file)
+            else:
+                logger.debug("UrlLinksProvider discover: links file missing. path=%s", links_file)
+            self._urls = {}
+            self._cached_sources = {}
+            self._links_file_last = None
             return {}
 
-        logger.debug("UrlLinksProvider discover: start. links_file=%s", links_file)
+        try:
+            stat = links_file.stat()
+            current = (int(stat.st_mtime_ns), int(stat.st_size))
+        except OSError:
+            logger.exception("Failed to stat links file. path=%s", links_file)
+            self._urls = {}
+            self._cached_sources = {}
+            self._links_file_last = None
+            return {}
+
+        if self._links_file_last == current:
+            logger.debug(
+                "UrlLinksProvider discover: links file unchanged; using cached URLs. path=%s mtime_ns=%s size_bytes=%s cached_urls=%s",
+                links_file,
+                current[0],
+                current[1],
+                len(self._cached_sources),
+            )
+            return dict(self._cached_sources)
+
+        try:
+            content = links_file.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            logger.exception("Failed to read links file. path=%s", links_file)
+            self._urls = {}
+            self._cached_sources = {}
+            self._links_file_last = None
+            return {}
+
+        logger.info(
+            "UrlLinksProvider discover: parsing links file. path=%s mtime_ns=%s size_bytes=%s",
+            links_file,
+            current[0],
+            current[1],
+        )
         sources: Dict[str, SourceType] = {}
+        urls: Dict[str, str] = {}
         for line in content.splitlines():
             url = line.strip()
             if not url or url.startswith("#"):
@@ -44,10 +81,13 @@ class UrlLinksProvider:
             if url in sources:
                 continue
             sources[url] = "url"
-            self._urls[url] = url
-            logger.debug("UrlLinksProvider discover: found URL. url=%s", url)
+            urls[url] = url
+
+        self._urls = urls
+        self._cached_sources = sources
+        self._links_file_last = current
         logger.debug("UrlLinksProvider discover: completed. discovered=%s", len(sources))
-        return sources
+        return dict(sources)
 
     async def init_record(self, *, source_id: str, now: datetime) -> CacheRecord | None:
         url = self._urls.get(source_id)
@@ -225,4 +265,3 @@ class UrlLinksProvider:
         url_meta.fetch_status = status
         url_meta.next_check_at = format_rfc3339(now + timedelta(seconds=self._config.runtime_refresh_tick_seconds))
         return True
-
