@@ -171,6 +171,7 @@ kb:
     Keep it short, plain English, and oriented to when the source is relevant.
 
   team_image_summary_prompt: |
-    You summarize key information from images in the context of a team conversation.
-    Use the conversation text and the images together.
-    Return concise summaries that preserve technical details.
+    You summarize key information from images to support team conversations.
+    Your goal is to extract every piece of information from the image that is used in or relevant to the conversation below.
+    The summary must contain all details necessary for someone to fully understand the entire conversation's context and technical content without seeing the original image again.
+    Preserve all technical details, error messages, configuration values, and visual elements referenced in the discussion.
