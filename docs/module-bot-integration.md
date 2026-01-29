@@ -24,7 +24,7 @@ The adapter supports multiple action handlers:
 ## External dependencies
 
 - `discord.py` (target: 2.6.4)
-- An AI response module client implementing `AIClient.generate_reply(...)` (defined below)
+- An AI response service implementing `generate_reply(...)` (defined below)
 
 ## Runtime configuration
 
@@ -49,11 +49,11 @@ See the shared boundary models in:
 
 ## Adapter -> AI interface
 
-The adapter depends on an AI client that exposes a single method and returns a strict schema:
+The adapter depends on an AI response service that exposes a single method and returns a strict schema:
 
 See:
 
-- `src/community_intern/ai_response/interfaces.py` (`AIClient`)
+- `src/community_intern/ai_response/impl.py` (`AIResponseService`)
 
 ---
 
@@ -214,6 +214,7 @@ Rules:
 This ensures:
 - Community user's multi-message question is captured as a complete batch before AI processing
 - Team member's multi-message answer is captured as a complete batch before Q&A storage
+- Image-only messages are preserved and batched with adjacent text
 
 Configuration:
 - `discord.message_batch_wait_seconds`: quiet window duration (default: 60 seconds)
@@ -271,7 +272,7 @@ Handles community user questions by calling the AI response module and posting r
 
 1. Receive batched messages from context gathering
 2. Normalize to `Conversation` (see normalization rules below)
-3. Call `AIClient.generate_reply(conversation, context)`
+3. Call `AIResponseService.generate_reply(conversation, context)`
 4. If `should_reply=true`:
    - Create a message-backed thread from the last message in the batch
    - Post the reply in the thread
@@ -283,7 +284,7 @@ Handles community user questions by calling the AI response module and posting r
 2. Verify bot has posted in this thread (at least one message with `author_id == BOT_USER_ID`)
 3. If not, ignore the message
 4. Normalize to `Conversation`
-5. Call `AIClient.generate_reply(conversation, context)`
+5. Call `AIResponseService.generate_reply(conversation, context)`
 6. If `should_reply=true`: post follow-up in the thread
 7. If `should_reply=false`: do nothing
 
@@ -297,6 +298,11 @@ Role mapping:
 Text normalization:
 - Strip leading/trailing whitespace
 - Remove empty messages
+
+Image normalization:
+- Include image attachments as `Message.images`
+- Keep messages that contain images even when text is empty
+- Convert Discord image URLs to base64 before passing to the AI response service
 
 ### Posting policy
 
@@ -430,6 +436,7 @@ sequenceDiagram
   - Log the failure (with IDs and timing)
   - Do not post an answer
   - Do not create a thread
+  - If any required image download fails, do not answer
 
 ### Discord API failures
 

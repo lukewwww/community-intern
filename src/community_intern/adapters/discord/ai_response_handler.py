@@ -11,8 +11,9 @@ import discord
 
 from community_intern.adapters.discord.handlers import ActionHandler
 from community_intern.adapters.discord.models import GatheredContext, MessageContext
-from community_intern.ai_response.interfaces import AIClient
-from community_intern.core.models import Conversation, Message, RequestContext
+from community_intern.llm.image_transport import download_images_as_base64
+from community_intern.ai_response import AIResponseService
+from community_intern.core.models import Conversation, ImageInput, Message, RequestContext
 
 logger = logging.getLogger(__name__)
 
@@ -25,16 +26,26 @@ def _to_utc_datetime(dt: datetime) -> datetime:
     return dt.astimezone(timezone.utc)
 
 
-def _normalize_messages(
+async def _normalize_messages(
     messages: Iterable[discord.Message],
     *,
     bot_user_id: int,
     team_member_ids: frozenset[str],
+    llm_enable_image: bool,
+    image_download_timeout_seconds: float,
+    image_download_max_retries: int,
 ) -> list[Message]:
     out: list[Message] = []
     for m in messages:
         text = (m.content or "").strip()
-        if not text:
+        images: list[ImageInput] = []
+        if llm_enable_image:
+            images = await _download_image_inputs(
+                _extract_image_inputs(m),
+                timeout_seconds=image_download_timeout_seconds,
+                max_retries=image_download_max_retries,
+            )
+        if not text and not images:
             continue
         if m.author is None:
             role = "user"
@@ -50,9 +61,84 @@ def _normalize_messages(
                 text=text,
                 timestamp=_to_utc_datetime(m.created_at),
                 author_id=str(m.author.id) if m.author is not None else None,
+                images=images or None,
             )
         )
     return out
+
+
+_IMAGE_EXTENSIONS = {
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".webp",
+    ".bmp",
+    ".tif",
+    ".tiff",
+    ".heic",
+    ".heif",
+    ".avif",
+}
+
+
+def _extract_image_inputs(message: discord.Message) -> list[ImageInput]:
+    images: list[ImageInput] = []
+    for attachment in message.attachments:
+        content_type = attachment.content_type
+        is_image = False
+        if content_type:
+            is_image = content_type.startswith("image/")
+        elif attachment.filename:
+            lower = attachment.filename.lower()
+            for ext in _IMAGE_EXTENSIONS:
+                if lower.endswith(ext):
+                    is_image = True
+                    break
+        if not is_image:
+            continue
+        images.append(
+            ImageInput(
+                url=attachment.url,
+                mime_type=content_type,
+                filename=attachment.filename,
+                size_bytes=attachment.size,
+                source="discord",
+            )
+        )
+    return images
+
+
+async def _download_image_inputs(
+    images: list[ImageInput],
+    *,
+    timeout_seconds: float,
+    max_retries: int,
+) -> list[ImageInput]:
+    if not images:
+        return []
+    base64_images = await download_images_as_base64(
+        images,
+        timeout_seconds=timeout_seconds,
+        max_retries=max_retries,
+    )
+    by_url = {img.source_url: img for img in base64_images}
+    enriched: list[ImageInput] = []
+    for image in images:
+        payload = by_url.get(image.url)
+        if payload is None:
+            continue
+        enriched.append(
+            ImageInput(
+                url=image.url,
+                mime_type=payload.mime_type or image.mime_type,
+                filename=image.filename,
+                size_bytes=image.size_bytes,
+                source=image.source,
+                base64_data=payload.base64_data,
+            )
+        )
+    return enriched
 
 
 def _thread_name_from_message(text: str) -> str:
@@ -108,15 +194,21 @@ class AIResponseHandler(ActionHandler):
     def __init__(
         self,
         *,
-        ai_client: AIClient,
+        ai_client: AIResponseService,
         bot_user_id: int,
         team_member_ids: frozenset[str],
         dry_run: bool,
+        llm_enable_image: bool,
+        image_download_timeout_seconds: float,
+        image_download_max_retries: int,
     ) -> None:
         self._ai_client = ai_client
         self._bot_user_id = bot_user_id
         self._team_member_ids = team_member_ids
         self._dry_run = dry_run
+        self._llm_enable_image = llm_enable_image
+        self._image_download_timeout_seconds = image_download_timeout_seconds
+        self._image_download_max_retries = image_download_max_retries
 
     async def handle(
         self,
@@ -135,7 +227,7 @@ class AIResponseHandler(ActionHandler):
         gathered_context: GatheredContext,
     ) -> None:
         messages = gathered_context.batch
-        messages = [m for m in messages if (m.content or "").strip()]
+        messages = [m for m in messages if _message_has_text_or_images(m)]
         if not messages:
             return
 
@@ -147,11 +239,21 @@ class AIResponseHandler(ActionHandler):
         if channel_id is None:
             return
 
-        conversation_messages = _normalize_messages(
-            messages,
-            bot_user_id=self._bot_user_id,
-            team_member_ids=self._team_member_ids,
-        )
+        try:
+            conversation_messages = await _normalize_messages(
+                messages,
+                bot_user_id=self._bot_user_id,
+                team_member_ids=self._team_member_ids,
+                llm_enable_image=self._llm_enable_image,
+                image_download_timeout_seconds=self._image_download_timeout_seconds,
+                image_download_max_retries=self._image_download_max_retries,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to download image attachments for AI response. message_id=%s",
+                str(last_message.id),
+            )
+            return
         if not conversation_messages:
             return
 
@@ -214,11 +316,21 @@ class AIResponseHandler(ActionHandler):
         if not is_eligible:
             return
 
-        normalized = _normalize_messages(
-            history,
-            bot_user_id=self._bot_user_id,
-            team_member_ids=self._team_member_ids,
-        )
+        try:
+            normalized = await _normalize_messages(
+                history,
+                bot_user_id=self._bot_user_id,
+                team_member_ids=self._team_member_ids,
+                llm_enable_image=self._llm_enable_image,
+                image_download_timeout_seconds=self._image_download_timeout_seconds,
+                image_download_max_retries=self._image_download_max_retries,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to download image attachments for AI response. message_id=%s",
+                str(message.id),
+            )
+            return
         if not normalized:
             return
 
@@ -373,3 +485,9 @@ class AIResponseHandler(ActionHandler):
             request_context.thread_id,
             request_context.message_id,
         )
+
+
+def _message_has_text_or_images(message: discord.Message) -> bool:
+    if (message.content or "").strip():
+        return True
+    return any(_extract_image_inputs(message))

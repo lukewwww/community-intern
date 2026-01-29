@@ -1,7 +1,7 @@
 """AI response module contracts (gating + retrieval + generation + verification)."""
 
-from community_intern.ai_response.impl import AIClientImpl
-from community_intern.ai_response.interfaces import AIConfig, AIClient
-from community_intern.ai_response.mock import MockAIClient
+from community_intern.ai_response.config import AIConfig
+from community_intern.ai_response.impl import AIResponseService
+from community_intern.ai_response.mock import MockAIResponseService
 
-__all__ = ["AIClient", "AIConfig", "AIClientImpl", "MockAIClient"]
+__all__ = ["AIConfig", "AIResponseService", "MockAIResponseService"]

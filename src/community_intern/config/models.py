@@ -5,7 +5,8 @@ from typing import Optional, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from community_intern.ai_response.interfaces import AIConfig, LLMSettings
+from community_intern.ai_response.config import AIConfig
+from community_intern.llm.settings import LLMSettings
 
 
 class AppSettings(BaseModel):
@@ -69,9 +70,6 @@ class KnowledgeBaseSettings(BaseModel):
     file_watch_debounce_seconds: float
 
     max_source_bytes: int
-    max_snippet_chars: int
-    max_snippets_per_query: int
-    max_sources_per_query: int
 
     # KB source summarization prompt
     summarization_prompt: str
@@ -86,6 +84,7 @@ class KnowledgeBaseSettings(BaseModel):
     team_classification_prompt: str
     team_integration_prompt: str
     team_summarization_prompt: str
+    team_image_summary_prompt: str
 
 
 class AppConfig(BaseModel):

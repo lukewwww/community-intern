@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 from typing import Optional, Sequence
 
-from community_intern.ai_response.interfaces import AIClient
+from community_intern.llm import LLMInvoker
 from community_intern.config.models import KnowledgeBaseSettings
 from community_intern.kb.interfaces import IndexEntry, SourceContent
 from community_intern.kb.web_fetcher import WebFetcher
@@ -21,9 +21,9 @@ KB_SOURCE_ID_PREFIX = "kb:"
 TEAM_SOURCE_ID_PREFIX = "team:"
 
 class FileSystemKnowledgeBase:
-    def __init__(self, config: KnowledgeBaseSettings, ai_client: AIClient):
+    def __init__(self, config: KnowledgeBaseSettings, llm_invoker: LLMInvoker):
         self.config = config
-        self.ai_client = ai_client
+        self.llm_invoker = llm_invoker
         self._topic_storage = TopicStorage(config.team_topics_dir, config.team_index_path)
         self._indexer = KnowledgeIndexer(
             cache_path=config.index_cache_path,
@@ -31,7 +31,7 @@ class FileSystemKnowledgeBase:
             index_prefix=KB_SOURCE_ID_PREFIX,
             summarization_prompt=config.summarization_prompt,
             summarization_concurrency=config.summarization_concurrency,
-            ai_client=ai_client,
+            llm_invoker=llm_invoker,
             providers=[
                 FileFolderProvider(sources_dir=config.sources_dir),
                 UrlLinksProvider(config=config),

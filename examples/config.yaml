@@ -23,6 +23,11 @@ ai_response:
     timeout_seconds: 60
     max_retries: 2
 
+  llm_enable_image: false
+  llm_image_adapter: "OpenAIImageAdapter"
+  image_download_timeout_seconds: 20
+  image_download_max_retries: 2
+
   graph_timeout_seconds: 200
 
   enable_verification: false
@@ -100,9 +105,6 @@ ai_response:
     Reject answers that contain unsupported claims or are not grounded in the provided context.
 
   max_sources: 6
-  max_snippets: 10
-  max_snippet_chars: 1200
-  min_snippet_score: 0.15
 
   max_answer_chars: 3000
 
@@ -125,9 +127,6 @@ kb:
   file_watch_debounce_seconds: 2
 
   max_source_bytes: 2000000
-  max_snippet_chars: 1200
-  max_snippets_per_query: 10
-  max_sources_per_query: 6
 
   summarization_prompt: |
     Write a compact index description of the source content.
@@ -170,3 +169,8 @@ kb:
     Write a compact index description of this Q&A topic file.
     Focus on coverage: list the main questions and topics covered.
     Keep it short, plain English, and oriented to when the source is relevant.
+
+  team_image_summary_prompt: |
+    You summarize key information from images in the context of a team conversation.
+    Use the conversation text and the images together.
+    Return concise summaries that preserve technical details.

@@ -5,11 +5,11 @@ import asyncio
 import logging
 
 from community_intern.adapters.discord import DiscordBotAdapter
-from community_intern.ai_response import AIClientImpl
-from community_intern.ai_response.interfaces import AIClient, AIConfig
+from community_intern.ai_response import AIResponseService
 from community_intern.config import YamlConfigLoader
 from community_intern.config.models import ConfigLoadRequest
 from community_intern.kb.impl import FileSystemKnowledgeBase
+from community_intern.llm import LLMInvoker
 from community_intern.logging import init_logging
 
 logger = logging.getLogger(__name__)
@@ -68,21 +68,14 @@ async def _load_config(args: argparse.Namespace):
     return await loader.load(request)
 
 
-def _build_kb_ai_client(
-    config,
-    *,
-    default_ai_client: AIClient | None = None,
-) -> AIClient:
-    if config.kb.llm is None:
-        if default_ai_client is not None:
-            return default_ai_client
-        return AIClientImpl(config=config.ai_response)
-
-    override = config.kb.llm
-    ai_data = config.ai_response.model_dump()
-    ai_data["llm"] = override.model_dump()
-    kb_ai_config = AIConfig.model_validate(ai_data)
-    return AIClientImpl(config=kb_ai_config)
+def _build_kb_llm_invoker(config) -> LLMInvoker:
+    llm_settings = config.kb.llm or config.ai_response.llm
+    return LLMInvoker(
+        llm=llm_settings,
+        project_introduction=config.ai_response.project_introduction,
+        llm_enable_image=config.ai_response.llm_enable_image,
+        llm_image_adapter=config.ai_response.llm_image_adapter,
+    )
 
 
 async def _run_bot(args: argparse.Namespace) -> None:
@@ -93,14 +86,20 @@ async def _run_bot(args: argparse.Namespace) -> None:
     logger.info("Starting application in bot mode. dry_run=%s", config.app.dry_run)
 
     # Initialize AI and KnowledgeBase with circular dependency injection
-    ai_client = AIClientImpl(config=config.ai_response)
-    kb_ai_client = _build_kb_ai_client(config, default_ai_client=ai_client)
-    kb = FileSystemKnowledgeBase(config=config.kb, ai_client=kb_ai_client)
-    ai_client.set_kb(kb)
+    ai_response = AIResponseService(config=config.ai_response)
+    kb_llm_invoker = _build_kb_llm_invoker(config)
+    team_llm_invoker = _build_kb_llm_invoker(config)
+    kb = FileSystemKnowledgeBase(config=config.kb, llm_invoker=kb_llm_invoker)
+    ai_response.set_kb(kb)
 
     # Initialize team knowledge capture
-    team_kb = TeamKnowledgeManager(config=config.kb, ai_client=kb_ai_client)
-    qa_capture_handler = QACaptureHandler(manager=team_kb)
+    team_kb = TeamKnowledgeManager(config=config.kb, llm_invoker=team_llm_invoker)
+    qa_capture_handler = QACaptureHandler(
+        manager=team_kb,
+        llm_enable_image=config.ai_response.llm_enable_image,
+        image_download_timeout_seconds=config.ai_response.image_download_timeout_seconds,
+        image_download_max_retries=config.ai_response.image_download_max_retries,
+    )
 
     index_task = asyncio.create_task(kb.build_index())
     index_task.add_done_callback(_log_index_task_result)
@@ -108,7 +107,7 @@ async def _run_bot(args: argparse.Namespace) -> None:
 
     adapter = DiscordBotAdapter(
         config=config,
-        ai_client=ai_client,
+        ai_client=ai_response,
         qa_capture_handler=qa_capture_handler,
     )
     try:
@@ -132,9 +131,8 @@ async def _init_kb(args: argparse.Namespace) -> None:
     init_logging(config.logging)
     logger.info("Starting knowledge base indexing.")
 
-    ai_client = _build_kb_ai_client(config)
-    kb = FileSystemKnowledgeBase(config=config.kb, ai_client=ai_client)
-    ai_client.set_kb(kb)
+    kb_llm_invoker = _build_kb_llm_invoker(config)
+    kb = FileSystemKnowledgeBase(config=config.kb, llm_invoker=kb_llm_invoker)
 
     await kb.build_index()
     logger.info("Knowledge base indexing completed.")
@@ -147,8 +145,8 @@ async def _init_team_kb(args: argparse.Namespace) -> None:
     init_logging(config.logging)
     logger.info("Starting team knowledge base initialization.")
 
-    ai_client = _build_kb_ai_client(config)
-    team_kb = TeamKnowledgeManager(config=config.kb, ai_client=ai_client)
+    team_llm_invoker = _build_kb_llm_invoker(config)
+    team_kb = TeamKnowledgeManager(config=config.kb, llm_invoker=team_llm_invoker)
 
     await team_kb.regenerate()
     logger.info("Team knowledge base initialization completed.")

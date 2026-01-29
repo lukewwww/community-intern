@@ -6,10 +6,14 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 import discord
+from pydantic import BaseModel, Field
 
 from community_intern.adapters.discord.handlers import ActionHandler
 from community_intern.adapters.discord.classifier import MessageClassifier
 from community_intern.adapters.discord.models import GatheredContext, MessageContext
+from community_intern.llm.image_transport import download_images_as_base64
+from community_intern.llm.prompts import compose_system_prompt
+from community_intern.core.models import ImageInput
 from community_intern.knowledge_cache.utils import format_rfc3339
 from community_intern.team_kb.models import Turn
 
@@ -17,6 +21,30 @@ if TYPE_CHECKING:
     from community_intern.team_kb.team_kb_manager import TeamKnowledgeManager
 
 logger = logging.getLogger(__name__)
+
+_IMAGE_EXTENSIONS = {
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".webp",
+    ".bmp",
+    ".tif",
+    ".tiff",
+    ".heic",
+    ".heif",
+    ".avif",
+}
+
+
+class ImageSummaryItem(BaseModel):
+    message_id: str = Field(description="Discord message ID tied to the image input")
+    image_index: int = Field(description="1-based index of the image within the message")
+    summary: str = Field(description="Summary of the key information from the image")
+
+
+class ImageSummaryResult(BaseModel):
+    summaries: list[ImageSummaryItem] = Field(default_factory=list)
 
 
 @dataclass
@@ -38,10 +66,16 @@ class QACaptureHandler(ActionHandler):
         self,
         *,
         manager: "TeamKnowledgeManager",
+        llm_enable_image: bool,
+        image_download_timeout_seconds: float,
+        image_download_max_retries: int,
         classifier: MessageClassifier | None = None,
     ) -> None:
         self._manager = manager
         self._classifier = classifier
+        self._llm_enable_image = llm_enable_image
+        self._image_download_timeout_seconds = image_download_timeout_seconds
+        self._image_download_max_retries = image_download_max_retries
 
     def set_classifier(self, classifier: MessageClassifier) -> None:
         """Inject the classifier after initialization."""
@@ -60,7 +94,17 @@ class QACaptureHandler(ActionHandler):
             )
             return
 
-        result = self._extract_qa_pair(message, context, gathered_context)
+        context_messages = self._collect_context_messages(message, gathered_context)
+        try:
+            image_summaries = await self._summarize_images(context_messages)
+        except Exception:
+            logger.exception(
+                "Image summarization failed; aborting capture. message_id=%s",
+                str(message.id),
+            )
+            return
+
+        result = self._extract_qa_pair(message, context, gathered_context, image_summaries)
         if result is None:
             logger.debug(
                 "No Q&A pair extracted from team member reply. message_id=%s",
@@ -89,6 +133,7 @@ class QACaptureHandler(ActionHandler):
         message: discord.Message,
         context: MessageContext,
         gathered_context: GatheredContext,
+        image_summaries: dict[str, list[tuple[int, str]]],
     ) -> ExtractedQA | None:
         turns: list[Turn] = []
         message_ids: list[str] = []
@@ -96,11 +141,11 @@ class QACaptureHandler(ActionHandler):
 
         if gathered_context.thread_history:
             turns, message_ids, conversation_id = self._extract_from_thread(
-                message, gathered_context
+                message, gathered_context, image_summaries
             )
         else:
             turns, message_ids, conversation_id = self._extract_from_reply_chain(
-                message, gathered_context
+                message, gathered_context, image_summaries
             )
 
         has_user = any(t.role == "user" for t in turns)
@@ -120,6 +165,7 @@ class QACaptureHandler(ActionHandler):
         self,
         message: discord.Message,
         gathered_context: GatheredContext,
+        image_summaries: dict[str, list[tuple[int, str]]],
     ) -> tuple[list[Turn], list[str], str]:
         """Extract Q&A from thread history."""
         turns: list[Turn] = []
@@ -147,6 +193,14 @@ class QACaptureHandler(ActionHandler):
             else:
                 role = "team"
             text = (msg.content or "").strip()
+            summaries = image_summaries.get(str(msg.id), [])
+            if summaries:
+                summaries.sort(key=lambda item: item[0])
+                summary_lines = [f"Image summary ({idx}): {summary}" for idx, summary in summaries]
+                if text:
+                    text = f"{text}\n" + "\n".join(summary_lines)
+                else:
+                    text = "\n".join(summary_lines)
 
             if text:
                 turns.append(Turn(role=role, content=text))
@@ -158,6 +212,7 @@ class QACaptureHandler(ActionHandler):
         self,
         message: discord.Message,
         gathered_context: GatheredContext,
+        image_summaries: dict[str, list[tuple[int, str]]],
     ) -> tuple[list[Turn], list[str], str]:
         """Extract Q&A from reply chain."""
         turns: list[Turn] = []
@@ -179,12 +234,28 @@ class QACaptureHandler(ActionHandler):
                 role = "team"
             for msg in group.messages:
                 text = (msg.content or "").strip()
+                summaries = image_summaries.get(str(msg.id), [])
+                if summaries:
+                    summaries.sort(key=lambda item: item[0])
+                    summary_lines = [f"Image summary ({idx}): {summary}" for idx, summary in summaries]
+                    if text:
+                        text = f"{text}\n" + "\n".join(summary_lines)
+                    else:
+                        text = "\n".join(summary_lines)
                 if text:
                     turns.append(Turn(role=role, content=text))
                     message_ids.append(str(msg.id))
 
         for msg in gathered_context.batch:
             text = (msg.content or "").strip()
+            summaries = image_summaries.get(str(msg.id), [])
+            if summaries:
+                summaries.sort(key=lambda item: item[0])
+                summary_lines = [f"Image summary ({idx}): {summary}" for idx, summary in summaries]
+                if text:
+                    text = f"{text}\n" + "\n".join(summary_lines)
+                else:
+                    text = "\n".join(summary_lines)
             if text:
                 if msg.author is not None and self._classifier is not None:
                     author_type = self._classifier.classify_author(msg.author.id)
@@ -199,9 +270,191 @@ class QACaptureHandler(ActionHandler):
         if not turns and gathered_context.reply_target_message is not None:
             target = gathered_context.reply_target_message
             target_text = (target.content or "").strip()
+            summaries = image_summaries.get(str(target.id), [])
+            if summaries:
+                summaries.sort(key=lambda item: item[0])
+                summary_lines = [f"Image summary ({idx}): {summary}" for idx, summary in summaries]
+                if target_text:
+                    target_text = f"{target_text}\n" + "\n".join(summary_lines)
+                else:
+                    target_text = "\n".join(summary_lines)
             if target_text:
                 turns.append(Turn(role="user", content=target_text))
                 message_ids.append(str(target.id))
                 conversation_id = f"reply_{target.id}"
 
         return turns, message_ids, conversation_id
+
+    def _collect_context_messages(
+        self,
+        message: discord.Message,
+        gathered_context: GatheredContext,
+    ) -> list[discord.Message]:
+        seen: set[int] = set()
+        messages: list[discord.Message] = []
+        if gathered_context.thread_history:
+            all_messages = list(gathered_context.thread_history)
+            for msg in gathered_context.batch:
+                if msg.id not in [m.id for m in all_messages]:
+                    all_messages.append(msg)
+            all_messages.sort(key=lambda m: m.created_at)
+            return all_messages
+
+        for group in gathered_context.reply_chain:
+            for msg in group.messages:
+                if msg.id in seen:
+                    continue
+                seen.add(msg.id)
+                messages.append(msg)
+
+        for msg in gathered_context.batch:
+            if msg.id in seen:
+                continue
+            seen.add(msg.id)
+            messages.append(msg)
+
+        target = gathered_context.reply_target_message
+        if target is not None and target.id not in seen:
+            messages.append(target)
+
+        messages.sort(key=lambda m: m.created_at)
+        return messages
+
+    async def _summarize_images(self, messages: list[discord.Message]) -> dict[str, list[tuple[int, str]]]:
+        image_items: list[tuple[str, int, ImageInput]] = []
+        for msg in messages:
+            inputs = _extract_image_inputs(msg)
+            if not inputs:
+                continue
+            msg_id = str(msg.id)
+            try:
+                images_with_payload = await _download_image_inputs(
+                    inputs,
+                    timeout_seconds=self._image_download_timeout_seconds,
+                    max_retries=self._image_download_max_retries,
+                )
+            except Exception:
+                logger.exception("Failed to download image attachments. message_id=%s", msg_id)
+                raise
+            for idx, image in enumerate(images_with_payload, start=1):
+                image_items.append((msg_id, idx, image))
+
+        if not image_items:
+            return {}
+        if not self._llm_enable_image:
+            raise RuntimeError("Image input is disabled by configuration.")
+
+        context_text = _format_conversation_context(messages, classifier=self._classifier)
+        mapping_lines = []
+        for item_idx, (msg_id, image_index, image) in enumerate(image_items, start=1):
+            filename = image.filename or "unknown"
+            mapping_lines.append(
+                f"Image {item_idx}: message_id={msg_id} image_index={image_index} filename={filename}"
+            )
+
+        user_content = (
+            "Conversation context:\n"
+            f"{context_text}\n\n"
+            "Image mapping:\n"
+            f"{chr(10).join(mapping_lines)}\n\n"
+            "Summarize the key information from each image in the context of the conversation. "
+            "Return one summary per message_id and image_index."
+        )
+        system_prompt = compose_system_prompt(
+            self._manager.config.team_image_summary_prompt,
+            self._manager.llm_invoker.project_introduction,
+        )
+        result: ImageSummaryResult = await self._manager.llm_invoker.invoke_llm(
+            system_prompt=system_prompt,
+            user_content=user_content,
+            images=[item[2] for item in image_items],
+            response_model=ImageSummaryResult,
+        )
+        summaries: dict[str, list[tuple[int, str]]] = {}
+        for item in result.summaries:
+            summary = item.summary.strip()
+            if summary:
+                summaries.setdefault(item.message_id, []).append((item.image_index, summary))
+        return summaries
+
+
+def _extract_image_inputs(message: discord.Message) -> list[ImageInput]:
+    images: list[ImageInput] = []
+    for attachment in message.attachments:
+        content_type = attachment.content_type
+        is_image = False
+        if content_type:
+            is_image = content_type.startswith("image/")
+        elif attachment.filename:
+            lower = attachment.filename.lower()
+            for ext in _IMAGE_EXTENSIONS:
+                if lower.endswith(ext):
+                    is_image = True
+                    break
+        if not is_image:
+            continue
+        images.append(
+            ImageInput(
+                url=attachment.url,
+                mime_type=content_type,
+                filename=attachment.filename,
+                size_bytes=attachment.size,
+                source="discord",
+            )
+        )
+    return images
+
+
+async def _download_image_inputs(
+    images: list[ImageInput],
+    *,
+    timeout_seconds: float,
+    max_retries: int,
+) -> list[ImageInput]:
+    if not images:
+        return []
+    base64_images = await download_images_as_base64(
+        images,
+        timeout_seconds=timeout_seconds,
+        max_retries=max_retries,
+    )
+    by_url = {img.source_url: img for img in base64_images}
+    enriched: list[ImageInput] = []
+    for image in images:
+        payload = by_url.get(image.url)
+        if payload is None:
+            continue
+        enriched.append(
+            ImageInput(
+                url=image.url,
+                mime_type=payload.mime_type or image.mime_type,
+                filename=image.filename,
+                size_bytes=image.size_bytes,
+                source=image.source,
+                base64_data=payload.base64_data,
+            )
+        )
+    return enriched
+
+
+def _format_conversation_context(
+    messages: list[discord.Message],
+    *,
+    classifier: MessageClassifier,
+) -> str:
+    lines = []
+    for msg in messages:
+        if msg.author is None:
+            continue
+        author_type = classifier.classify_author(msg.author.id)
+        if author_type == "community_user":
+            role = "User"
+        elif author_type == "bot":
+            role = "Bot"
+        else:
+            role = "Team"
+        content = (msg.content or "").strip()
+        if not content:
+            content = "Image-only message."
+        lines.append(f"{role}({msg.id}): {content}")
+    return "\n".join(lines).strip()

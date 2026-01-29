@@ -52,7 +52,7 @@ See the example config file: `examples/config.yaml`.
 
 Related contract types:
 
-- `src/community_intern/ai_response/interfaces.py` (`AIConfig`)
+- `src/community_intern/ai_response/config.py` (`AIConfig`)
 - `src/community_intern/config/models.py` (`AppConfig`, `DiscordSettings`, `KnowledgeBaseSettings`)
 
 ## AI Response structured output method

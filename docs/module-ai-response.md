@@ -2,48 +2,25 @@
 
 ## Purpose
 
-The AI Response module is responsible for all LLM-based operations in the bot. Its primary purpose is to generate safe answers to user questions using a Knowledge Base. It also provides simple LLM call interfaces for other modules that need single-step LLM operations.
+The AI Response module is responsible for generating safe answers to user questions using a Knowledge Base. It owns the reply workflow and the LLM usage for that workflow.
 
 ## Responsibilities
 
 - **Answer Generation**: Orchestrate a multi-step workflow to decide if a question is answerable, select sources, load content, generate an answer, and verify it.
-- **Simple LLM Calls**: Provide a reusable `invoke_llm` interface for single-step LLM operations.
 - **Safety & Verification**: Ensure answers are grounded in provided sources and safe to post.
-- **Resource Management**: Efficiently manage LLM API calls and share a single LLM client instance.
+- **Resource Management**: Efficiently manage LLM API calls for the reply workflow.
 
 ## Public Interfaces
 
-The `AIClient` provides interfaces for both complex multi-step workflows and simple single-step LLM operations.
+The AI response module exposes the reply workflow through its AI response service.
 
-### 1. Project Introduction Property (`project_introduction`)
-
-A read-only property that returns the configured `project_introduction` prompt string.
-
-- **Output**: `str`
-- **Usage**: Callers of `invoke_llm` should use this property to access the project introduction and append it to their system prompts as needed.
-
-### 2. Generate Reply (`generate_reply`)
+### Generate Reply
 
 The main entry point for the bot's conversational capabilities.
 
 - **Input**: `Conversation`, `RequestContext`
 - **Output**: `AIResult` (contains `should_reply`, `reply_text`)
 - **Implementation**: **Graph-based Orchestration** using LangGraph.
-
-### 3. Invoke LLM (`invoke_llm`)
-
-A generic interface for single-step LLM operations that other modules can use.
-
-- **Input**: `system_prompt`, `user_content`, `response_model` (Pydantic model)
-- **Output**: Validated Pydantic model instance
-- **Behavior**:
-  - Passes the system prompt directly to the LLM without modification
-  - Uses `with_structured_output` for automatic JSON schema and validation
-  - Uses shared `ChatCrynux` instance with configured timeouts and retries
-
-Callers are responsible for appending `project_introduction` to their system prompts if needed. The `AIClient.project_introduction` property provides access to the configured value.
-
-This interface enables other modules to perform LLM operations while sharing the same configuration (endpoint, model, timeouts, retries).
 
 
 ## Implementation Architecture
@@ -85,7 +62,8 @@ flowchart LR
   In[Input: Conversation + Context] --> Gate[1. Gating]
   Gate -->|not answerable| OutNo[Return should_reply=false]
   Gate -->|answerable| Select[2. Source selection via KB index]
-  Select -->|no sources| OutNo
+  Select -->|no sources and no images| OutNo
+  Select -->|no sources and images| Gen
   Select --> Load[3. Load selected source content]
   Load --> Gen[4. Generation]
   Gen -->|if enabled| Ver[5. Verification]
@@ -109,6 +87,7 @@ The Graph structure is the high-level container for the workflow logic.
 - **Inputs**: Conversation history, `gating_prompt`.
 - **Output**: `should_reply`.
 - **Behavior**: Fast fail if the user input is chit-chat or off-topic.
+  - When image input is enabled, each user message can include images and the order is preserved.
 
 ##### Node 2: Source selection
 - **Goal**: Select relevant file paths from the KB index.
@@ -127,6 +106,7 @@ The Graph structure is the high-level container for the workflow logic.
 - **Inputs**: User question, loaded source text, `answer_prompt`.
 - **Output**: `draft_answer`.
 - **Constraints**: Must use only provided context. Must not hallucinate.
+  - When image input is enabled, the user message includes images in the configured adapter format.
 
 ##### Node 5: Answer verification
 - **Goal**: Final safety check.
@@ -134,31 +114,19 @@ The Graph structure is the high-level container for the workflow logic.
 - **Output**: `verification` (boolean).
 - **Behavior**: Acts as a "supervisor" to reject low-quality or unsafe answers. This step is skipped unless verification is enabled in configuration.
 
-### Direct LLM Calls
-
-The `invoke_llm` interface bypasses the LangGraph workflow and uses a shared `ChatCrynux` instance directly. This avoids graph state management overhead for straightforward single-step tasks.
-
-**Shared LLM Instance**:
-- A single `ChatCrynux` instance is created at `AIClient` initialization
-- Configured with the same LLM settings as the graph (endpoint, model, timeouts, retries)
-- Reused across all `invoke_llm` calls
-
-**Output**:
-- **JSON-only**: Callers MUST provide a Pydantic model and the LLM MUST return JSON that validates against the model.
-- **Text via JSON**: For single string outputs, callers SHOULD use `LLMTextResult` with a single `text` field.
-
 ## Link Inclusion
 
 When the selected sources include URL identifiers, the final reply text includes a short "Links" section with those URLs. This makes it easier for users to jump directly to the primary references without requiring citation formatting in the answer text.
 
 ## LLM Integration
 
-The module uses `langchain-crynux` (`ChatCrynux`, ChatOpenAI-compatible) for all LLM interactions:
+The module uses `langchain-crynux` (`ChatCrynux`, ChatOpenAI-compatible) for all reply workflow interactions:
 
 - **Graph workflow**: A `ChatCrynux` instance is created at graph build time and injected into graph nodes
-- **Simple calls**: A shared `ChatCrynux` instance is created at `AIClient` initialization and reused for all direct LLM calls
 
 AI response operations MUST use ChatCrynux configured from `ai_response.llm`.
+
+Shared LLM utilities are defined in `src/community_intern/llm/` and include image adapters plus prompt composition helpers that are reused across modules.
 
 ## Shared Data Models
 
@@ -180,7 +148,7 @@ The `ai_response.llm` object defines:
 - `timeout_seconds`: Timeout per individual LLM call (network timeout).
 - `max_retries`: Maximum retry attempts for transient failures.
 
-The AI response module MUST use `ai_response.llm` for `generate_reply` and `invoke_llm`. Knowledge Base LLM overrides are configured under `kb.llm` and MUST NOT change AI response behavior.
+The AI response module MUST use `ai_response.llm` for `generate_reply`. Knowledge Base LLM overrides are configured under `kb.llm` and MUST NOT change AI response behavior.
 
 ### Graph-Specific Keys (`generate_reply`)
 - **Workflow Timeout**: `graph_timeout_seconds` (End-to-end timeout for the entire graph execution).
@@ -189,10 +157,19 @@ The AI response module MUST use `ai_response.llm` for `generate_reply` and `invo
 - **Prompts**: `gating_prompt`, `selection_prompt`, `answer_prompt`, `verification_prompt`.
 - **Limits**: `max_sources`, `max_answer_chars`.
 
+### Image Handling Keys
+- **Image Enable Switch**: `llm_enable_image` MUST gate all image handling behavior.
+- **Image Adapter**: `llm_image_adapter` MUST select the adapter for request formatting.
+- **Download Timeout**: `image_download_timeout_seconds` MUST bound each image download.
+- **Download Retries**: `image_download_max_retries` MUST control retry attempts for image fetch.
+
+Image adapter implementations live in `src/community_intern/llm/image_adapters.py`. Image downloads are handled by `src/community_intern/llm/image_transport.py` in the integration layer before the AI response graph runs.
+
 ## Error Handling
 
 - **Timeouts**: Strict timeouts apply to the overall request and individual LLM calls.
 - **Fail-Safe**: If any step in the graph fails (e.g., API error, validation error), the module returns `should_reply=false` rather than crashing.
+- **Image Failures**: If any required image download fails, the module MUST return `should_reply=false` without answering.
 - **Logging**: Detailed logs capture the decision path (gating -> selection -> generation) for debugging.
 
 ## Prompt Assembly Rules
@@ -200,8 +177,9 @@ The AI response module MUST use `ai_response.llm` for `generate_reply` and `invo
 The configuration provides task-focused prompt content only. The runtime assembles the final system prompts by appending shared and fixed requirements in code:
 
 - For the graph workflow (`generate_reply`): `project_introduction` is appended to the system prompt for gating, source selection, answer generation, and verification.
-- For simple LLM calls (`invoke_llm`): Callers are responsible for appending `project_introduction` to their prompts using `ai_client.project_introduction`.
 - All LLM calls MUST use JSON-only structured outputs. Output format requirements are enforced in code and are not configurable.
+
+The shared prompt composition helper lives in `src/community_intern/llm/prompts.py` and ensures consistent assembly across modules.
 
 ## Observability
 

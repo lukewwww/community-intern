@@ -6,7 +6,8 @@ from typing import List
 
 from pydantic import BaseModel, Field
 
-from community_intern.ai_response.interfaces import AIClient
+from community_intern.llm import LLMInvoker
+from community_intern.llm.prompts import compose_system_prompt
 from community_intern.config.models import KnowledgeBaseSettings
 from community_intern.knowledge_cache.indexer import KnowledgeIndexer
 from community_intern.knowledge_cache.providers.file_folder import FileFolderProvider
@@ -44,25 +45,15 @@ class IntegrationResult(BaseModel):
     )
 
 
-def _compose_system_prompt(base_prompt: str, project_introduction: str) -> str:
-    """Compose system prompt by appending project introduction if available."""
-    parts = []
-    if base_prompt.strip():
-        parts.append(base_prompt.strip())
-    if project_introduction.strip():
-        parts.append(f"Project introduction:\n{project_introduction.strip()}")
-    return "\n\n".join(parts).strip()
-
-
 class TeamKnowledgeManager:
     def __init__(
         self,
         *,
         config: KnowledgeBaseSettings,
-        ai_client: AIClient,
+        llm_invoker: LLMInvoker,
     ) -> None:
         self._config = config
-        self._ai_client = ai_client
+        self._llm_invoker = llm_invoker
         self._lock = asyncio.Lock()
 
         self._raw_archive = RawArchive(config.team_raw_dir)
@@ -73,10 +64,18 @@ class TeamKnowledgeManager:
             index_prefix=TEAM_SOURCE_ID_PREFIX,
             summarization_prompt=config.team_summarization_prompt,
             summarization_concurrency=config.summarization_concurrency,
-            ai_client=ai_client,
+            llm_invoker=llm_invoker,
             providers=[FileFolderProvider(sources_dir=config.team_topics_dir)],
             source_type_order=["file"],
         )
+
+    @property
+    def config(self) -> KnowledgeBaseSettings:
+        return self._config
+
+    @property
+    def llm_invoker(self) -> LLMInvoker:
+        return self._llm_invoker
 
     async def capture_qa(
         self,
@@ -154,11 +153,11 @@ class TeamKnowledgeManager:
         user_content = f"Current index:\n{index_text}\n\n---\n\nNew Q&A pair:\n{qa_text}"
 
         try:
-            system_prompt = _compose_system_prompt(
+            system_prompt = compose_system_prompt(
                 self._config.team_classification_prompt,
-                self._ai_client.project_introduction,
+                self._llm_invoker.project_introduction,
             )
-            result: ClassificationResult = await self._ai_client.invoke_llm(
+            result: ClassificationResult = await self._llm_invoker.invoke_llm(
                 system_prompt=system_prompt,
                 user_content=user_content,
                 response_model=ClassificationResult,
@@ -214,11 +213,11 @@ class TeamKnowledgeManager:
         user_content = f"Existing topic file content:\n{existing_text}\n\n---\n\nNew Q&A pair to add:\n{new_block}"
 
         try:
-            system_prompt = _compose_system_prompt(
+            system_prompt = compose_system_prompt(
                 self._config.team_integration_prompt,
-                self._ai_client.project_introduction,
+                self._llm_invoker.project_introduction,
             )
-            result: IntegrationResult = await self._ai_client.invoke_llm(
+            result: IntegrationResult = await self._llm_invoker.invoke_llm(
                 system_prompt=system_prompt,
                 user_content=user_content,
                 response_model=IntegrationResult,

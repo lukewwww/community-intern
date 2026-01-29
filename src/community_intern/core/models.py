@@ -9,11 +9,22 @@ Platform = Literal["discord"]
 
 
 @dataclass(frozen=True, slots=True)
+class ImageInput:
+    url: str
+    mime_type: Optional[str]
+    filename: Optional[str]
+    size_bytes: Optional[int]
+    source: Optional[str]
+    base64_data: Optional[str] = None
+
+
+@dataclass(frozen=True, slots=True)
 class Message:
     role: Role
     text: str
     timestamp: datetime
     author_id: Optional[str]
+    images: Optional[Sequence[ImageInput]] = None
 
 
 @dataclass(frozen=True, slots=True)

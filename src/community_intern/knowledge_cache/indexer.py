@@ -7,21 +7,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Iterable, Protocol
 
-from community_intern.ai_response.interfaces import AIClient, LLMTextResult
+from community_intern.llm import LLMInvoker, LLMTextResult
+from community_intern.llm.prompts import compose_system_prompt
 from community_intern.knowledge_cache.io import atomic_write_json, build_index_entries, encode_cache, read_cache_file, write_index_file
 from community_intern.knowledge_cache.models import CacheRecord, CacheState, SchemaVersion, SourceType
 from community_intern.knowledge_cache.utils import format_rfc3339, utc_now
 
 logger = logging.getLogger(__name__)
-
-
-def _compose_system_prompt(base_prompt: str, project_introduction: str) -> str:
-    parts = []
-    if base_prompt.strip():
-        parts.append(base_prompt.strip())
-    if project_introduction.strip():
-        parts.append(f"Project introduction:\n{project_introduction.strip()}")
-    return "\n\n".join(parts).strip()
 
 
 class SourceProvider(Protocol):
@@ -47,7 +39,7 @@ class KnowledgeIndexer:
         index_prefix: str,
         summarization_prompt: str,
         summarization_concurrency: int,
-        ai_client: AIClient,
+        llm_invoker: LLMInvoker,
         providers: Iterable[SourceProvider],
         source_type_order: list[SourceType],
     ) -> None:
@@ -56,7 +48,7 @@ class KnowledgeIndexer:
         self._index_prefix = index_prefix
         self._summarization_prompt = summarization_prompt
         self._summarization_concurrency = max(1, int(summarization_concurrency))
-        self._ai_client = ai_client
+        self._llm_invoker = llm_invoker
         self._providers = list(providers)
         self._source_type_order = source_type_order
 
@@ -280,9 +272,9 @@ class KnowledgeIndexer:
                 if not text or not text.strip():
                     logger.warning("KB index summarize %s/%s: empty source text. source_id=%s", position, total, source_id)
                     return
-                system_prompt = _compose_system_prompt(
+                system_prompt = compose_system_prompt(
                     self._summarization_prompt,
-                    self._ai_client.project_introduction,
+                    self._llm_invoker.project_introduction,
                 )
                 logger.debug(
                     "KB index summarize %s/%s: invoking LLM. source_id=%s text_chars=%s system_prompt_chars=%s",
@@ -292,7 +284,7 @@ class KnowledgeIndexer:
                     len(text),
                     len(system_prompt),
                 )
-                result = await self._ai_client.invoke_llm(
+                result = await self._llm_invoker.invoke_llm(
                     system_prompt=system_prompt,
                     user_content=text,
                     response_model=LLMTextResult,

@@ -8,25 +8,16 @@ from langchain_crynux import ChatCrynux
 from langgraph.graph import StateGraph, END
 from pydantic import BaseModel, Field
 
-from community_intern.ai_response.interfaces import AIConfig
+from community_intern.ai_response.config import AIConfig
+from community_intern.llm.image_adapters import ContentPart, ImagePart, LLMImageAdapter, TextPart
 from community_intern.core.models import Conversation, RequestContext, AIResult
 from community_intern.kb.interfaces import KnowledgeBase, SourceContent
+from community_intern.llm.prompts import compose_system_prompt
 
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from langchain_openai import ChatOpenAI
-
-# --- Prompt composition ---
-
-def _compose_system_prompt(*, base_prompt: str, project_introduction: str) -> str:
-    parts: List[str] = []
-    if base_prompt.strip():
-        parts.append(base_prompt.strip())
-    if project_introduction.strip():
-        parts.append(f"Project introduction:\n{project_introduction.strip()}")
-    return "\n\n".join(parts).strip()
-
 
 # --- Graph State ---
 
@@ -37,6 +28,7 @@ class GraphState(TypedDict):
     kb: KnowledgeBase
 
     user_question: str
+    user_parts: List[ContentPart]
 
     kb_index_text: str
     selected_source_ids: List[str]
@@ -65,25 +57,51 @@ class LLMVerificationResult(BaseModel):
 
 # --- Nodes ---
 
-async def node_gating(state: GraphState, *, llm: "ChatOpenAI") -> Dict[str, Any]:
+def _build_user_message(
+    *,
+    text: str,
+    parts: List[ContentPart],
+    adapter: LLMImageAdapter,
+    enable_images: bool,
+) -> HumanMessage:
+    if enable_images and parts:
+        content = adapter.build_user_content(
+            parts=[TextPart(type="text", text=text), *parts],
+        )
+    else:
+        content = text
+    return HumanMessage(content=content)
+
+
+async def node_gating(
+    state: GraphState, *, llm: "ChatOpenAI", image_adapter: LLMImageAdapter
+) -> Dict[str, Any]:
     config = state["config"]
     conversation = state["conversation"]
+    parts = state.get("user_parts", [])
 
     last_msg = conversation.messages[-1].text if conversation.messages else ""
+    if not last_msg and parts:
+        last_msg = "User provided images without additional text."
 
     structured_llm = llm.with_structured_output(
         LLMGateDecision,
-        method=config.structured_output_method,
+        method=config.llm.structured_output_method,
     )
 
     messages = [
         SystemMessage(
-            content=_compose_system_prompt(
+            content=compose_system_prompt(
                 base_prompt=config.gating_prompt,
                 project_introduction=config.project_introduction,
             )
         ),
-        HumanMessage(content=f"User input: {last_msg}")
+        _build_user_message(
+            text=f"User input: {last_msg}",
+            parts=parts,
+            adapter=image_adapter,
+            enable_images=config.llm_enable_image,
+        ),
     ]
 
     try:
@@ -100,10 +118,15 @@ async def node_gating(state: GraphState, *, llm: "ChatOpenAI") -> Dict[str, Any]
         }
 
 
-async def node_selection(state: GraphState, *, llm: "ChatOpenAI") -> Dict[str, Any]:
+async def node_selection(
+    state: GraphState, *, llm: "ChatOpenAI", image_adapter: LLMImageAdapter
+) -> Dict[str, Any]:
     config = state["config"]
     kb = state["kb"]
     query = state["user_question"]
+    parts = state.get("user_parts", [])
+    if not query and parts:
+        query = "User provided images without additional text."
 
     try:
         kb_index_text = await kb.load_index_text()
@@ -113,17 +136,22 @@ async def node_selection(state: GraphState, *, llm: "ChatOpenAI") -> Dict[str, A
 
     structured_llm = llm.with_structured_output(
         LLMSelectionResult,
-        method=config.structured_output_method,
+        method=config.llm.structured_output_method,
     )
 
     messages = [
         SystemMessage(
-            content=_compose_system_prompt(
+            content=compose_system_prompt(
                 base_prompt=config.selection_prompt,
                 project_introduction=config.project_introduction,
             )
         ),
-        HumanMessage(content=f"Index:\n{kb_index_text}\n\nQuery: {query}")
+        _build_user_message(
+            text=f"Index:\n{kb_index_text}\n\nQuery: {query}",
+            parts=parts,
+            adapter=image_adapter,
+            enable_images=config.llm_enable_image,
+        ),
     ]
 
     try:
@@ -156,26 +184,36 @@ async def node_loading(state: GraphState) -> Dict[str, Any]:
     return {"loaded_sources": loaded}
 
 
-async def node_generation(state: GraphState, *, llm: "ChatOpenAI") -> Dict[str, Any]:
+async def node_generation(
+    state: GraphState, *, llm: "ChatOpenAI", image_adapter: LLMImageAdapter
+) -> Dict[str, Any]:
     config = state["config"]
     loaded = state["loaded_sources"]
     query = state["user_question"]
+    parts = state.get("user_parts", [])
+    if not query and parts:
+        query = "User provided images without additional text."
 
     sources_text = "\n\n".join([f"Source: {s.source_id}\nContent:\n{s.text}" for s in loaded])
 
     structured_llm = llm.with_structured_output(
         LLMGenerationResult,
-        method=config.structured_output_method,
+        method=config.llm.structured_output_method,
     )
 
     messages = [
         SystemMessage(
-            content=_compose_system_prompt(
+            content=compose_system_prompt(
                 base_prompt=config.answer_prompt,
                 project_introduction=config.project_introduction,
             )
         ),
-        HumanMessage(content=f"Context:\n{sources_text}\n\nQuestion: {query}")
+        _build_user_message(
+            text=f"Context:\n{sources_text}\n\nQuestion: {query}",
+            parts=parts,
+            adapter=image_adapter,
+            enable_images=config.llm_enable_image,
+        ),
     ]
 
     try:
@@ -196,26 +234,34 @@ async def node_generation(state: GraphState, *, llm: "ChatOpenAI") -> Dict[str, 
         return {"should_reply": False}
 
 
-async def node_verification(state: GraphState, *, llm: "ChatOpenAI") -> Dict[str, Any]:
+async def node_verification(
+    state: GraphState, *, llm: "ChatOpenAI", image_adapter: LLMImageAdapter
+) -> Dict[str, Any]:
     config = state["config"]
     draft = state["draft_answer"]
     loaded = state["loaded_sources"]
+    parts = state.get("user_parts", [])
 
     sources_text = "\n\n".join([f"Source: {s.source_id}\nContent:\n{s.text}" for s in loaded])
 
     structured_llm = llm.with_structured_output(
         LLMVerificationResult,
-        method=config.structured_output_method,
+        method=config.llm.structured_output_method,
     )
 
     messages = [
         SystemMessage(
-            content=_compose_system_prompt(
+            content=compose_system_prompt(
                 base_prompt=config.verification_prompt,
                 project_introduction=config.project_introduction,
             )
         ),
-        HumanMessage(content=f"Context:\n{sources_text}\n\nDraft Answer: {draft}")
+        _build_user_message(
+            text=f"Context:\n{sources_text}\n\nDraft Answer: {draft}",
+            parts=parts,
+            adapter=image_adapter,
+            enable_images=config.llm_enable_image,
+        ),
     ]
 
     try:
@@ -238,7 +284,7 @@ async def node_verification(state: GraphState, *, llm: "ChatOpenAI") -> Dict[str
         return {"should_reply": False}
 
 
-def build_ai_graph(config: AIConfig) -> Runnable:
+def build_ai_graph(config: AIConfig, *, image_adapter: LLMImageAdapter) -> Runnable:
     """
     Builds and compiles the AI LangGraph application.
     This should be called once at startup.
@@ -260,11 +306,11 @@ def build_ai_graph(config: AIConfig) -> Runnable:
     workflow = StateGraph(GraphState)
 
     # Inject LLM into nodes using partial application
-    workflow.add_node("gating", partial(node_gating, llm=llm))
-    workflow.add_node("selection", partial(node_selection, llm=llm))
+    workflow.add_node("gating", partial(node_gating, llm=llm, image_adapter=image_adapter))
+    workflow.add_node("selection", partial(node_selection, llm=llm, image_adapter=image_adapter))
     workflow.add_node("loading", node_loading)
-    workflow.add_node("generation", partial(node_generation, llm=llm))
-    workflow.add_node("verification", partial(node_verification, llm=llm))
+    workflow.add_node("generation", partial(node_generation, llm=llm, image_adapter=image_adapter))
+    workflow.add_node("verification", partial(node_verification, llm=llm, image_adapter=image_adapter))
 
     workflow.set_entry_point("gating")
 
@@ -274,8 +320,12 @@ def build_ai_graph(config: AIConfig) -> Runnable:
         return END
 
     def check_selection(state: GraphState) -> str:
-        if state.get("should_reply", False) and state.get("selected_source_ids"):
+        if not state.get("should_reply", False):
+            return END
+        if state.get("selected_source_ids"):
             return "loading"
+        if state.get("user_parts"):
+            return "generation"
         return END
 
     def check_loading(state: GraphState) -> str:

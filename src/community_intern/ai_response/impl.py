@@ -1,21 +1,15 @@
 import logging
 import asyncio
-from typing import Optional, Type, TypeVar
-
-from langchain_core.messages import SystemMessage, HumanMessage
+from typing import Optional
 from langchain_core.runnables import Runnable
-from langchain_crynux import ChatCrynux
-from pydantic import BaseModel
-
-from community_intern.ai_response.interfaces import AIClient, AIConfig
+from community_intern.ai_response.config import AIConfig
+from community_intern.llm.image_adapters import ContentPart, ImagePart, TextPart, get_image_adapter
 from community_intern.core.models import AIResult, Conversation, RequestContext
 from community_intern.kb.interfaces import KnowledgeBase
 from community_intern.ai_response.graph import build_ai_graph, GraphState
+from community_intern.llm.image_utils import build_base64_images
 
 logger = logging.getLogger(__name__)
-
-T = TypeVar("T", bound=BaseModel)
-
 
 def _append_selected_links(reply_text: str, *, selected_source_ids: list[str]) -> str:
     links = []
@@ -38,31 +32,14 @@ def _append_selected_links(reply_text: str, *, selected_source_ids: list[str]) -
     return "\n".join(lines).strip()
 
 
-class AIClientImpl(AIClient):
+class AIResponseService:
     def __init__(self, config: AIConfig, kb: Optional[KnowledgeBase] = None):
         self._config = config
         self._kb = kb
 
         # Build and compile the graph for generate_reply
-        self._app: Runnable = build_ai_graph(config)
-
-        # Shared LLM instance for simple single-step calls
-        llm_config = config.llm
-        self._llm = ChatCrynux(
-            base_url=llm_config.base_url,
-            api_key=llm_config.api_key,
-            model=llm_config.model,
-        # Only pass vram_limit if it is not None
-        **({"vram_limit": llm_config.vram_limit} if llm_config.vram_limit is not None else {}),
-            temperature=0.0,
-            request_timeout=llm_config.timeout_seconds,
-            max_retries=llm_config.max_retries,
-        )
-
-    @property
-    def project_introduction(self) -> str:
-        """Return the project introduction prompt from configuration."""
-        return self._config.project_introduction
+        self._image_adapter = get_image_adapter(config.llm_image_adapter)
+        self._app: Runnable = build_ai_graph(config, image_adapter=self._image_adapter)
 
     def set_kb(self, kb: KnowledgeBase) -> None:
         """
@@ -75,12 +52,29 @@ class AIClientImpl(AIClient):
             logger.warning("Knowledge base is not configured, skipping AI reply generation.")
             return AIResult(should_reply=False, reply_text=None)
 
+        user_parts: list[ContentPart] = []
+        if self._config.llm_enable_image:
+            try:
+                user_parts = _build_user_parts(conversation)
+            except Exception:
+                logger.exception(
+                    "Image base64 payload missing; skipping AI reply. platform=%s message_id=%s",
+                    context.platform,
+                    context.message_id,
+                )
+                return AIResult(
+                    should_reply=False,
+                    reply_text=None,
+                    debug={"error": "image_base64_missing"},
+                )
+
         initial_state: GraphState = {
             "conversation": conversation,
             "context": context,
             "config": self._config,
             "kb": self._kb,
             "user_question": "",
+            "user_parts": user_parts,
             "kb_index_text": "",
             "selected_source_ids": [],
             "loaded_sources": [],
@@ -117,45 +111,17 @@ class AIClientImpl(AIClient):
             logger.exception("AI reply generation failed.")
             return AIResult(should_reply=False, reply_text=None)
 
-    async def invoke_llm(
-        self,
-        *,
-        system_prompt: str,
-        user_content: str,
-        response_model: Type[T],
-    ) -> T:
-        """
-        Invoke the LLM with the given prompts.
-
-        Callers are responsible for appending project_introduction to the system prompt
-        if needed. Use ai_client.project_introduction to get the configured value.
-
-        Args:
-            system_prompt: The system prompt to send to the LLM
-            user_content: The user message content
-            response_model: Pydantic model for structured output
-
-        Returns:
-            Validated instance of the model.
-        """
-        messages = [
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=user_content),
-        ]
-
-        structured_llm = self._llm.with_structured_output(
-            response_model,
-            method=self._config.llm.structured_output_method,
-        )
-        result = await asyncio.wait_for(
-            structured_llm.ainvoke(messages),
-            timeout=self._config.llm.timeout_seconds,
-        )
-        if result is None:
-            raise RuntimeError("LLM returned null structured output.")
-        try:
-            return response_model.model_validate(result)
-        except Exception as exc:
-            raise RuntimeError(
-                f"LLM returned unexpected structured output. expected={response_model.__name__} got={type(result).__name__}"
-            ) from exc
+def _build_user_parts(conversation: Conversation) -> list[ContentPart]:
+    parts: list[ContentPart] = []
+    for msg in conversation.messages:
+        if msg.role != "user":
+            continue
+        text = (msg.text or "").strip()
+        if text:
+            parts.append(TextPart(type="text", text=f"User: {text}"))
+        elif msg.images:
+            parts.append(TextPart(type="text", text="User sent images."))
+        if msg.images:
+            base64_images = build_base64_images(msg.images)
+            parts.extend([ImagePart(type="image", image=img) for img in base64_images])
+    return parts

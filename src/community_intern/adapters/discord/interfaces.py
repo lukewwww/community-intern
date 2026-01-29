@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from community_intern.ai_response.interfaces import AIClient
+from community_intern.ai_response import AIResponseService
 
 
 class DiscordAdapter(Protocol):
@@ -14,7 +14,7 @@ class DiscordAdapter(Protocol):
     """
 
     @property
-    def ai_client(self) -> AIClient: ...
+    def ai_client(self) -> AIResponseService: ...
 
     async def start(self) -> None:
         """Start the adapter and connect to Discord."""

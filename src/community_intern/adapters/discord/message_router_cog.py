@@ -14,10 +14,24 @@ from community_intern.adapters.discord.classifier import MessageClassifier
 from community_intern.adapters.discord.context_gatherer import ContextGatherer
 from community_intern.adapters.discord.handlers import ActionHandler
 from community_intern.adapters.discord.models import GatheredContext
-from community_intern.ai_response.interfaces import AIClient
+from community_intern.ai_response import AIResponseService
 from community_intern.config.models import DiscordSettings
 
 logger = logging.getLogger(__name__)
+
+_IMAGE_EXTENSIONS = {
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".webp",
+    ".bmp",
+    ".tif",
+    ".tiff",
+    ".heic",
+    ".heif",
+    ".avif",
+}
 
 
 @dataclass
@@ -41,15 +55,21 @@ class MessageRouterCog(commands.Cog):
         self,
         *,
         bot: commands.Bot,
-        ai_client: AIClient,
+        ai_client: AIResponseService,
         settings: DiscordSettings,
         dry_run: bool,
+        llm_enable_image: bool,
+        image_download_timeout_seconds: float,
+        image_download_max_retries: int,
         qa_capture_handler: Optional[ActionHandler] = None,
     ) -> None:
         self._bot = bot
         self._ai_client = ai_client
         self._settings = settings
         self._dry_run = dry_run
+        self._llm_enable_image = llm_enable_image
+        self._image_download_timeout_seconds = image_download_timeout_seconds
+        self._image_download_max_retries = image_download_max_retries
         self._qa_capture_handler = qa_capture_handler
 
         self._classifier: Optional[MessageClassifier] = None
@@ -59,7 +79,7 @@ class MessageRouterCog(commands.Cog):
         self._pending_batches: dict[tuple[str, str, str], _PendingBatch] = {}
 
     @property
-    def ai_client(self) -> AIClient:
+    def ai_client(self) -> AIResponseService:
         return self._ai_client
 
     def set_qa_capture_handler(self, handler: ActionHandler) -> None:
@@ -94,6 +114,9 @@ class MessageRouterCog(commands.Cog):
             bot_user_id=bot_user_id,
             team_member_ids=team_member_ids,
             dry_run=self._dry_run,
+            llm_enable_image=self._llm_enable_image,
+            image_download_timeout_seconds=self._image_download_timeout_seconds,
+            image_download_max_retries=self._image_download_max_retries,
         )
 
         return ActionRouter(
@@ -107,8 +130,7 @@ class MessageRouterCog(commands.Cog):
         if message.author is not None and message.author.bot:
             return
 
-        content = (message.content or "").strip()
-        if not content:
+        if not _message_has_text_or_images(message, allow_images=self._llm_enable_image):
             return
 
         bot_user = self._bot.user
@@ -201,7 +223,7 @@ class MessageRouterCog(commands.Cog):
             logger.exception("Failed to process batched Discord messages. guild_id=%s channel_id=%s author_id=%s", *key)
 
     async def _process_batch(self, *, messages: list[discord.Message]) -> None:
-        messages = [m for m in messages if (m.content or "").strip()]
+        messages = [m for m in messages if _message_has_text_or_images(m, allow_images=self._llm_enable_image)]
         if not messages:
             return
 
@@ -219,3 +241,19 @@ class MessageRouterCog(commands.Cog):
         )
 
         await self._action_router.route(last_message, context, gathered_context)
+
+
+def _message_has_text_or_images(message: discord.Message, *, allow_images: bool) -> bool:
+    if (message.content or "").strip():
+        return True
+    if not allow_images:
+        return False
+    for attachment in message.attachments:
+        content_type = attachment.content_type
+        if content_type and content_type.startswith("image/"):
+            return True
+        if attachment.filename:
+            filename = attachment.filename.lower()
+            if any(filename.endswith(ext) for ext in _IMAGE_EXTENSIONS):
+                return True
+    return False

@@ -31,7 +31,8 @@ The system captures complete Q&A exchanges from Discord:
 - Extract the user's question and the team member's answer
 - Group consecutive messages from the same author into a single block
 - Handle multi-turn conversations: user question → team answer → user follow-up → team follow-up answer are captured as a single Q&A pair
-- Preserve original message content without summarization
+- Preserve original message text without summarization
+- Summarize key information from images into text before Q&A extraction
 
 **Thread handling**: When a team member posts in a thread, the capture includes the full thread message history plus the thread starter message from the parent channel. If any included message is a Discord reply, the capture also includes the referenced message chain and adjacent messages from the same author within the batching window.
 
@@ -52,6 +53,8 @@ The captured knowledge is organized for efficient use:
 ### Two-Tier Storage Architecture
 
 The system maintains two storage tiers:
+
+Before any tier storage, the system MUST summarize key image information into text using the full conversation context and inject the summary into the Q&A text.
 
 **Tier 1: Raw Data Archive**
 - Permanent, append-only archive of all captured Q&A pairs
@@ -82,13 +85,21 @@ When adding a Q&A pair to a topic file, the LLM decides how to integrate it:
 
 ### LLM Integration
 
-The Team Knowledge module uses the AI response module's `invoke_llm` interface for LLM operations (see `module-ai-response.md`):
+The Team Knowledge module uses the shared LLM invoker component for LLM operations:
 
-- Calls `AIClient.invoke_llm` with a system prompt and Pydantic response model
+- Calls `LLMInvoker.invoke_llm` from `src/community_intern/llm/invoker.py` with a system prompt and Pydantic response model
 - Prompts are configured in the `kb` section of the config file
 - Uses `with_structured_output` for automatic JSON schema and validation
 - Appends `project_introduction` from AI response config to all LLM calls
 - LLM calls MUST use ChatCrynux with `kb.llm` when configured, otherwise they MUST use `ai_response.llm`
+- Image summarization MUST use `invoke_llm` with base64 images provided by the Discord adapter
+- Image downloads use `src/community_intern/llm/image_transport.py`
+- Image adapters live in `src/community_intern/llm/image_adapters.py`
+- Prompt composition uses `src/community_intern/llm/prompts.py`
+
+### LLM Instances
+
+- Team Knowledge MUST use its own ChatCrynux instance configured from `kb.llm` when set, or from `ai_response.llm` when `kb.llm` is null.
 
 LLM responses are kept minimal to reduce token usage and improve reliability:
 
@@ -174,13 +185,18 @@ async def handle(
     context: MessageContext,
     gathered_context: GatheredContext
 ) -> None:
-    # 1. Extract Q&A pair from gathered context
-    qa_pair = extract_qa_pair(context, gathered_context)
+    # 1. Summarize image content using full conversation context
+    #    The summary is keyed by message_id and image_index to preserve ordering and association.
+    image_summary = summarize_images(context, gathered_context)
 
-    # 2. Store to raw archive (Tier 1)
+    # 2. Extract Q&A pair from gathered context and image summary
+    #    The extractor injects the summary into the matching message by id.
+    qa_pair = extract_qa_pair(context, gathered_context, image_summary)
+
+    # 3. Store to raw archive (Tier 1)
     await append_to_raw_archive(qa_pair)
 
-    # 3. Classify and integrate into topic file (Tier 2)
+    # 4. Classify and integrate into topic file (Tier 2)
     await classify_and_integrate(qa_pair)
 ```
 
@@ -399,6 +415,10 @@ kb:
   team_summarization_prompt: |
     Write a compact index description of this Q&A topic file.
     ...
+
+  team_image_summary_prompt: |
+    Summarize key information from images in the context of the team conversation.
+    ...
 ```
 
 ---
@@ -438,6 +458,11 @@ Discord Message Event
 │ bot-integration)│
 └────────┬────────┘
          │ routes to QACaptureHandler
+         ▼
+┌─────────────────┐
+│ Image Summary   │ Summarize image content with full conversation context
+└────────┬────────┘
+         │
          ▼
 ┌─────────────────┐
 │ Q&A Extraction  │ Transform gathered context into Q&A pair
@@ -502,6 +527,7 @@ CLI Command
 | Classification returns skip | Log and skip indexing; Q&A pair remains in raw archive |
 | Empty topic_name without skip | Log warning and skip indexing |
 | Malformed raw file entry | Log warning, skip entry during regeneration |
+| Image summary failure | Log and abort capture before Tier 1 write |
 
 ---
 
@@ -554,7 +580,7 @@ Module boundaries:
 ## Dependencies
 
 - Discord adapter ([`module-bot-integration.md`](./module-bot-integration.md)): This module implements `QACaptureHandler`; the adapter provides message classification, context gathering, and routing
-- AI response module ([`module-ai-response.md`](./module-ai-response.md)): Provides LLM calls for classification, integration, and index summarization via a shared `ChatCrynux` instance.
+- Shared LLM utilities: `src/community_intern/llm/invoker.py`, `src/community_intern/llm/image_adapters.py`, `src/community_intern/llm/image_transport.py`, `src/community_intern/llm/prompts.py`
 - Shared cache modules:
   - `src/community_intern/knowledge_cache/utils.py`
   - `src/community_intern/knowledge_cache/io.py`

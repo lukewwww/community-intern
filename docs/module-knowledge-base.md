@@ -50,6 +50,8 @@ The Knowledge Base reads these keys under the `kb` section:
 
 `kb.llm` defines optional LLM overrides for Knowledge Base operations. When `kb.llm` is `null`, the Knowledge Base MUST use the `ai_response.llm` settings. When configured, `kb.llm` MUST define `base_url`, `api_key`, `model`, `vram_limit`, `structured_output_method`, `timeout_seconds`, and `max_retries`.
 
+The Knowledge Base uses the shared LLM invoker in `src/community_intern/llm/invoker.py`, which creates ChatCrynux configured from `kb.llm` when set, or from `ai_response.llm` when `kb.llm` is `null`.
+
 ## Cache and incremental updates
 
 The Knowledge Base uses a persistent cache metadata file to support incremental updates of `index.txt` and to reduce unnecessary AI summarization and URL fetching.
@@ -126,11 +128,12 @@ The KB module reads team knowledge but does not generate or modify it:
 
 For each source:
 - Use an LLM to produce a short description focused on what the source covers and when it is relevant.
-- The LLM summarization MUST be performed via the AI response module's `invoke_llm` interface. See [`./module-ai-response.md`](./module-ai-response.md).
+- The LLM summarization MUST be performed via the shared LLM invoker component using structured output validation.
 - The summarization prompt is configured via `kb.summarization_prompt`.
 - LLM summarization MUST run as an independent phase and MUST be limited by `kb.summarization_concurrency`.
 
-The Knowledge Base MUST use ChatCrynux for summarization. It MUST use `kb.llm` when configured, otherwise it MUST use `ai_response.llm`.
+The Knowledge Base MUST use the shared LLM invoker for summarization, configured from `kb.llm` when available, otherwise from `ai_response.llm`.
+The shared prompt composition helper lives in `src/community_intern/llm/prompts.py` and appends the project introduction for LLM calls.
 
 The index generation step should be deterministic as much as possible to avoid noisy diffs.
 

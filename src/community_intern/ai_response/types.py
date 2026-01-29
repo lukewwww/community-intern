@@ -10,7 +10,7 @@ class GraphState(TypedDict):
     This is a contract for orchestration state, not an implementation.
     """
 
-    # Inputs (types live in community_intern.core.models and community_intern.ai_response.interfaces)
+    # Inputs (types live in community_intern.core.models and community_intern.ai_response.config)
     conversation: object
     context: object
     config: object

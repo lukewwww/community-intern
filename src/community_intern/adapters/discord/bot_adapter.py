@@ -10,7 +10,7 @@ from discord.ext import commands
 from community_intern.adapters.discord.handlers import ActionHandler
 from community_intern.adapters.discord.interfaces import DiscordAdapter
 from community_intern.adapters.discord.message_router_cog import MessageRouterCog
-from community_intern.ai_response.interfaces import AIClient
+from community_intern.ai_response import AIResponseService
 from community_intern.config.models import AppConfig
 
 logger = logging.getLogger(__name__)
@@ -29,7 +29,7 @@ class _InternBot(commands.Bot):
         self,
         *,
         config: AppConfig,
-        ai_client: AIClient,
+        ai_client: AIResponseService,
         qa_capture_handler: Optional[ActionHandler] = None,
     ) -> None:
         intents = _build_intents()
@@ -40,6 +40,9 @@ class _InternBot(commands.Bot):
             ai_client=ai_client,
             settings=config.discord,
             dry_run=config.app.dry_run,
+            llm_enable_image=config.ai_response.llm_enable_image,
+            image_download_timeout_seconds=config.ai_response.image_download_timeout_seconds,
+            image_download_max_retries=config.ai_response.image_download_max_retries,
             qa_capture_handler=qa_capture_handler,
         )
 
@@ -60,7 +63,7 @@ class DiscordBotAdapter(DiscordAdapter):
         self,
         *,
         config: AppConfig,
-        ai_client: AIClient,
+        ai_client: AIResponseService,
         qa_capture_handler: Optional[ActionHandler] = None,
     ) -> None:
         self._config = config
@@ -73,7 +76,7 @@ class DiscordBotAdapter(DiscordAdapter):
         )
 
     @property
-    def ai_client(self) -> AIClient:
+    def ai_client(self) -> AIResponseService:
         return self._ai_client
 
     async def start(self) -> None:

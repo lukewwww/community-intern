@@ -46,6 +46,16 @@ The system is split into three modules:
 2. **AI Response**, stateless decision and answer generation
 3. **Knowledge Base**, content ingestion, startup indexing, and source loading
 
+## Shared LLM utilities
+
+The three modules share common LLM helpers without depending on each other. These helpers live under `src/community_intern/llm/`.
+
+- `LLMInvoker` provides structured LLM calls used across modules.
+- `image_adapters.py` defines image formatting adapters for each LLM vendor.
+- `image_transport.py` downloads and converts images for LLM input.
+- `image_utils.py` builds base64 payloads from image inputs.
+- `prompts.py` composes system prompts with the project introduction.
+
 ### Data flow, happy path
 
 - A message is posted in a channel the bot can read.
@@ -68,7 +78,7 @@ The system is split into three modules:
 
 ### Interfaces
 
-- Bot-to-AI boundary: `src/community_intern/ai_response/interfaces.py` `AIClient`
+- Bot-to-AI boundary: `src/community_intern/ai_response/impl.py` `AIResponseService`
 - Shared models and result schema: `src/community_intern/core/models.py`
 
 Implementation details for the Bot Integration module live in [`./module-bot-integration.md`](./module-bot-integration.md).

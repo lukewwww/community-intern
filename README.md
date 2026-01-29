@@ -17,6 +17,7 @@ It also learns from your team by automatically capturing Q&A conversations when 
 ## Key features
 
 - **AI-generated, source-grounded answers**: An LLM generates answers from your documentation sources and can include citations back to those sources.
+- **Multimodal support**: The bot can read and understand images (such as error screenshots) in user messages to provide context-aware answers.
 - **Guided retrieval for reliable source selection**: Uses an LLM-guided selection flow (instead of embedding-only RAG) to pick the best sources for short or ambiguous questions.
 - **Knowledge base from files and links**: Uses a local folder of text sources and can incorporate web pages referenced by links, including JavaScript-rendered pages that require a headless browser to fully load before content extraction.
 - **Token-efficient web ingestion**: After fetching web pages, the HTML content is cleaned to keep only key content, reducing LLM token usage during indexing and answering.
@@ -37,6 +38,7 @@ Key capabilities:
 - **LLM-organized topic library**: Captured knowledge is automatically classified into topic-indexed documents using an LLM. New Q&A pairs are intelligently integrated with existing knowledge, and outdated information is automatically superseded when newer answers replace old ones.
 - **Two-tier storage**: A raw archive preserves all original captures for audit and regeneration, while the topic-indexed library provides efficient retrieval for answering questions.
 - **Knowledge base integration**: Team knowledge is seamlessly combined with static documentation when answering questions, with team knowledge taking precedence for real-world, community-tested answers.
+- **Context-aware image extraction**: Goes beyond the text - uses the LLM to analyze images within the full Q&A conversation context, intelligently identifying and converting the key visual information into text for the knowledge base.
 
 ## Documentation
 
