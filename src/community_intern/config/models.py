@@ -87,6 +87,10 @@ class KnowledgeBaseSettings(BaseModel):
     team_summarization_prompt: str
     team_image_summary_prompt: str
 
+    # Team knowledge state
+    team_state_path: str = "data/team-knowledge/state.json"
+    team_start_qa_timestamp: str = ""
+
 
 class AppConfig(BaseModel):
     """

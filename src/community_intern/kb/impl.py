@@ -4,7 +4,10 @@ import asyncio
 import logging
 import time
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import Optional, Sequence, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from community_intern.team_kb.team_kb_manager import TeamKnowledgeManager
 
 from community_intern.llm import LLMInvoker
 from community_intern.config.models import KnowledgeBaseSettings
@@ -40,6 +43,10 @@ class FileSystemKnowledgeBase:
         )
         self._runtime_task: Optional[asyncio.Task] = None
         self._stop_event = asyncio.Event()
+        self._team_kb_manager: Optional[TeamKnowledgeManager] = None
+
+    def set_team_kb_manager(self, manager: TeamKnowledgeManager) -> None:
+        self._team_kb_manager = manager
 
     def _extract_team_topic_filename(self, source_id: str) -> str:
         raw = source_id.strip()
@@ -136,6 +143,12 @@ class FileSystemKnowledgeBase:
         while not self._stop_event.is_set():
             started = time.monotonic()
             try:
+                if self._team_kb_manager:
+                    try:
+                        await self._team_kb_manager.process_pending_items()
+                    except Exception:
+                        logger.exception("Team KB pending items processing failed.")
+                
                 await self._indexer.run_once()
             except Exception:
                 logger.exception("Knowledge base runtime refresh tick failed.")

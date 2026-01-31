@@ -34,3 +34,8 @@ class ClassificationResult:
 class IntegrationResult:
     skip: bool = False
     remove_ids: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class TeamKBState:
+    last_processed_qa_id: str = ""

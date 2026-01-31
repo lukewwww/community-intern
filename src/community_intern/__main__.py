@@ -103,6 +103,7 @@ async def _run_bot(args: argparse.Namespace) -> None:
 
     index_task = asyncio.create_task(kb.build_index())
     index_task.add_done_callback(_log_index_task_result)
+    kb.set_team_kb_manager(team_kb)
     kb.start_runtime_refresh()
 
     adapter = DiscordBotAdapter(

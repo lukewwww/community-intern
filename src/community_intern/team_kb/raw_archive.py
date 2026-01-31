@@ -163,3 +163,53 @@ class RawArchive:
             all_pairs.sort(key=lambda p: p.timestamp)
 
         return all_pairs
+
+    def load_since(self, last_processed_qa_id: str) -> list[QAPair]:
+        """Load pending QA pairs that are newer than the last processed ID."""
+        if not self._raw_dir.exists():
+            return []
+
+        if not last_processed_qa_id:
+            return self.load_all(deduplicate=True)
+
+        last_dt = None
+        try:
+            # qa_id format: qa_20260115_143200
+            raw = last_processed_qa_id.replace("qa_", "")
+            # We don't need full datetime parsing for file selection if we trust the naming convention
+            # But parsing validates the ID format
+            last_dt = datetime.strptime(raw, "%Y%m%d_%H%M%S")
+        except ValueError:
+            logger.warning(
+                "Invalid last_processed_qa_id format: %s. Loading all.",
+                last_processed_qa_id,
+            )
+            return self.load_all(deduplicate=True)
+
+        start_week_file = get_week_filename(last_dt)
+        files = sorted(self._raw_dir.glob("*.txt"))
+        
+        # Filter files that might contain newer entries
+        # Since files are named YYYY-WWW, string comparison works
+        relevant_files = [f for f in files if f.name >= start_week_file]
+        
+        if not relevant_files:
+            return []
+
+        all_pairs: list[QAPair] = []
+        for file_path in relevant_files:
+            try:
+                content = file_path.read_text(encoding="utf-8")
+                pairs = parse_raw_file(content)
+                all_pairs.extend(pairs)
+            except (OSError, UnicodeDecodeError):
+                logger.exception("Failed to read raw archive file. file=%s", file_path.name)
+
+        # Filter strictly newer pairs
+        filtered = [p for p in all_pairs if p.id > last_processed_qa_id]
+        
+        if filtered:
+            # Deduplicate to ensure we only process the most complete version of any new conversations
+            filtered = deduplicate_by_conversation(filtered)
+            
+        return filtered

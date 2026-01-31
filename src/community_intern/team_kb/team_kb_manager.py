@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
+from pathlib import Path
 from typing import List
 
 from pydantic import BaseModel, Field
@@ -9,9 +11,10 @@ from pydantic import BaseModel, Field
 from community_intern.llm import LLMInvoker
 from community_intern.llm.prompts import compose_system_prompt
 from community_intern.config.models import KnowledgeBaseSettings
+from community_intern.knowledge_cache.io import atomic_write_text
 from community_intern.knowledge_cache.indexer import KnowledgeIndexer
 from community_intern.knowledge_cache.providers.file_folder import FileFolderProvider
-from community_intern.team_kb.models import QAPair, Turn
+from community_intern.team_kb.models import QAPair, Turn, TeamKBState
 from community_intern.team_kb.raw_archive import RawArchive
 from community_intern.team_kb.topic_storage import TopicStorage, format_topic_block
 
@@ -69,6 +72,8 @@ class TeamKnowledgeManager:
             source_type_order=["file"],
         )
 
+        self._state_path = Path(config.team_state_path)
+
     @property
     def config(self) -> KnowledgeBaseSettings:
         return self._config
@@ -97,14 +102,17 @@ class TeamKnowledgeManager:
         async with self._lock:
             await self._raw_archive.append(qa_pair)
 
-            await self._classify_and_integrate(qa_pair)
+        # Trigger pending item processing (will acquire lock internally)
+        # This ensures that even if this item fails, it's queued for retry,
+        # and if previous items were pending, they get processed in order.
+        await self.process_pending_items()
 
-            logger.info(
-                "Q&A pair captured and indexed. qa_id=%s turn_count=%d conversation_id=%s",
-                qa_id,
-                len(turns),
-                conversation_id,
-            )
+        logger.info(
+            "Q&A pair captured. qa_id=%s turn_count=%d conversation_id=%s",
+            qa_id,
+            len(turns),
+            conversation_id,
+        )
 
     def _generate_qa_id(self, timestamp: str) -> str:
         clean = timestamp.replace("-", "").replace(":", "").replace("T", "_").replace("Z", "")
@@ -152,21 +160,15 @@ class TeamKnowledgeManager:
         qa_text = self._format_qa_pair_for_llm(qa_pair)
         user_content = f"Current index:\n{index_text}\n\n---\n\nNew Q&A pair:\n{qa_text}"
 
-        try:
-            system_prompt = compose_system_prompt(
-                self._config.team_classification_prompt,
-                self._llm_invoker.project_introduction,
-            )
-            result: ClassificationResult = await self._llm_invoker.invoke_llm(
-                system_prompt=system_prompt,
-                user_content=user_content,
-                response_model=ClassificationResult,
-            )
-        except Exception:
-            logger.exception(
-                "LLM classification failed, skipping integration. qa_id=%s", qa_pair.id
-            )
-            return
+        system_prompt = compose_system_prompt(
+            self._config.team_classification_prompt,
+            self._llm_invoker.project_introduction,
+        )
+        result: ClassificationResult = await self._llm_invoker.invoke_llm(
+            system_prompt=system_prompt,
+            user_content=user_content,
+            response_model=ClassificationResult,
+        )
 
         if result.skip:
             logger.info(
@@ -181,7 +183,10 @@ class TeamKnowledgeManager:
                 "Classification returned empty topic_name without skip=true. qa_id=%s",
                 qa_pair.id,
             )
-            return
+            # Treat this as a failure to prevent marking as processed if it's a transient issue?
+            # Or logic error? If logic error, retrying won't help.
+            # But let's raise error so it retries or requires manual intervention.
+            raise ValueError(f"Empty topic_name for qa_id={qa_pair.id}")
 
         logger.debug(
             "Topic classification result. qa_id=%s topic_name=%s",
@@ -212,22 +217,17 @@ class TeamKnowledgeManager:
 
         user_content = f"Existing topic file content:\n{existing_text}\n\n---\n\nNew Q&A pair to add:\n{new_block}"
 
-        try:
-            system_prompt = compose_system_prompt(
-                self._config.team_integration_prompt,
-                self._llm_invoker.project_introduction,
-            )
-            result: IntegrationResult = await self._llm_invoker.invoke_llm(
-                system_prompt=system_prompt,
-                user_content=user_content,
-                response_model=IntegrationResult,
-            )
-            skip = result.skip
-            remove_ids = result.remove_ids
-        except Exception:
-            logger.exception("LLM integration failed. qa_id=%s topic=%s", qa_pair.id, filename)
-            skip = False
-            remove_ids = []
+        system_prompt = compose_system_prompt(
+            self._config.team_integration_prompt,
+            self._llm_invoker.project_introduction,
+        )
+        result: IntegrationResult = await self._llm_invoker.invoke_llm(
+            system_prompt=system_prompt,
+            user_content=user_content,
+            response_model=IntegrationResult,
+        )
+        skip = result.skip
+        remove_ids = result.remove_ids
 
         logger.debug(
             "Topic integration result. qa_id=%s topic=%s skip=%s remove_ids=%s",
@@ -266,9 +266,16 @@ class TeamKnowledgeManager:
             all_pairs = self._raw_archive.load_all()
             logger.info("Loaded %d QA pairs from raw archive.", len(all_pairs))
 
+            # Reset state for regeneration
+            self._save_state(TeamKBState())
+
             for i, qa_pair in enumerate(all_pairs):
                 try:
                     await self._classify_and_integrate(qa_pair)
+                    # Update state during regeneration too
+                    self._save_state(TeamKBState(
+                        last_processed_qa_id=qa_pair.id
+                    ))
                     logger.debug(
                         "Reprocessed QA pair %d/%d. qa_id=%s",
                         i + 1,
@@ -277,5 +284,78 @@ class TeamKnowledgeManager:
                     )
                 except Exception:
                     logger.exception("Failed to reprocess QA pair. qa_id=%s", qa_pair.id)
+                    # For regeneration, we might want to continue even if one fails
+                    # But if we update state, we might skip failed ones if we run regenerate again?
+                    # No, regenerate clears everything, so it starts fresh.
 
         logger.info("Team knowledge base regeneration completed. processed=%d", len(all_pairs))
+
+    def _load_state(self) -> TeamKBState:
+        state = TeamKBState()
+        if self._state_path.exists():
+            try:
+                state = TeamKBState.model_validate_json(self._state_path.read_text(encoding="utf-8"))
+            except Exception:
+                logger.warning("Failed to load team KB state. Resetting to empty.", exc_info=True)
+
+        # Apply manual start timestamp from config if present
+        config_timestamp = self._config.team_start_qa_timestamp.strip()
+        if config_timestamp:
+            # Generate ID from timestamp to compare with stored state
+            # We want to start processing FROM this timestamp (inclusive),
+            # so we set the last_processed_id to effectively "just before" this timestamp.
+            config_start_id = self._generate_qa_id(config_timestamp)
+            
+            # Decrement last character to create a threshold ID that is strictly less than
+            # the target ID, ensuring the target ID is picked up by "load_since(threshold)".
+            if config_start_id:
+                last_char = config_start_id[-1]
+                # This works because IDs end in digits (0-9), and decrementing '0' gives '/'
+                # which is a valid character for string comparison and sorts before '0'.
+                config_threshold_id = config_start_id[:-1] + chr(ord(last_char) - 1)
+                
+                if config_threshold_id > state.last_processed_qa_id:
+                    logger.info(
+                        "Using configured team_start_qa_timestamp as override. stored=%s config_ts=%s threshold=%s",
+                        state.last_processed_qa_id,
+                        config_timestamp,
+                        config_threshold_id,
+                    )
+                    state.last_processed_qa_id = config_threshold_id
+
+        return state
+
+    def _save_state(self, state: TeamKBState) -> None:
+        try:
+            atomic_write_text(self._state_path, state.model_dump_json(indent=2))
+        except Exception:
+            logger.error("Failed to save team KB state.", exc_info=True)
+
+    async def process_pending_items(self) -> None:
+        async with self._lock:
+            # 1. Process pending raw archive items (Tier 1 -> Tier 2)
+            state = self._load_state()
+            pending = self._raw_archive.load_since(state.last_processed_qa_id)
+
+            if pending:
+                logger.info("Processing %d pending team QA pairs.", len(pending))
+                for qa_pair in pending:
+                    try:
+                        await self._classify_and_integrate(qa_pair)
+                        # Update state after success
+                        state.last_processed_qa_id = qa_pair.id
+                        self._save_state(state)
+                    except Exception:
+                        logger.exception(
+                            "Failed to process pending QA pair. qa_id=%s. Stopping queue processing.",
+                            qa_pair.id
+                        )
+                        break
+
+            # 2. Process pending index summaries (Tier 2 -> Index)
+            # This handles cases where index summarization failed previously,
+            # ensuring self-healing for the team knowledge index.
+            try:
+                await self._topic_indexer.run_once()
+            except Exception:
+                logger.exception("Failed to run team topic indexer during pending items processing.")
