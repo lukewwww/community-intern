@@ -43,6 +43,7 @@ class _InternBot(commands.Bot):
             llm_enable_image=config.ai_response.llm_enable_image,
             image_download_timeout_seconds=config.ai_response.image_download_timeout_seconds,
             image_download_max_retries=config.ai_response.image_download_max_retries,
+            image_max_bytes=config.ai_response.image_max_bytes,
             qa_capture_handler=qa_capture_handler,
         )
 

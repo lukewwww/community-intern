@@ -62,6 +62,7 @@ class MessageRouterCog(commands.Cog):
         llm_enable_image: bool,
         image_download_timeout_seconds: float,
         image_download_max_retries: int,
+        image_max_bytes: int,
         qa_capture_handler: Optional[ActionHandler] = None,
     ) -> None:
         self._bot = bot
@@ -71,6 +72,7 @@ class MessageRouterCog(commands.Cog):
         self._llm_enable_image = llm_enable_image
         self._image_download_timeout_seconds = image_download_timeout_seconds
         self._image_download_max_retries = image_download_max_retries
+        self._image_max_bytes = image_max_bytes
         self._qa_capture_handler = qa_capture_handler
 
         self._classifier: Optional[MessageClassifier] = None
@@ -119,6 +121,7 @@ class MessageRouterCog(commands.Cog):
             llm_enable_image=self._llm_enable_image,
             image_download_timeout_seconds=self._image_download_timeout_seconds,
             image_download_max_retries=self._image_download_max_retries,
+            image_max_bytes=self._image_max_bytes,
         )
 
         return ActionRouter(

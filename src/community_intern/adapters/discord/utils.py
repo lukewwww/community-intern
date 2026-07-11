@@ -77,6 +77,7 @@ async def download_image_inputs(
     *,
     timeout_seconds: float,
     max_retries: int,
+    max_bytes: int,
 ) -> list[ImageInput]:
     if not images:
         return []
@@ -84,6 +85,7 @@ async def download_image_inputs(
         images,
         timeout_seconds=timeout_seconds,
         max_retries=max_retries,
+        max_bytes=max_bytes,
     )
     by_url = {img.source_url: img for img in base64_images}
     enriched: list[ImageInput] = []

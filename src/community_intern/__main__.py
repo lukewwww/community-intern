@@ -97,8 +97,9 @@ async def _run_bot(args: argparse.Namespace) -> None:
     qa_capture_handler = QACaptureHandler(
         manager=team_kb,
         llm_enable_image=config.ai_response.llm_enable_image,
-        image_download_timeout_seconds=config.ai_response.image_download_timeout_seconds,
-        image_download_max_retries=config.ai_response.image_download_max_retries,
+        image_download_timeout_seconds=config.kb.image_download_timeout_seconds,
+        image_download_max_retries=config.kb.image_download_max_retries,
+        image_max_bytes=config.kb.image_max_bytes,
     )
 
     index_task = asyncio.create_task(kb.build_index())

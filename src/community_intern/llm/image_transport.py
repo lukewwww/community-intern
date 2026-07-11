@@ -9,6 +9,7 @@ import aiohttp
 
 from community_intern.core.models import ImageInput
 from community_intern.llm.image_adapters import Base64Image
+from community_intern.llm.image_utils import shrink_image_to_limit
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,7 @@ async def _download_one(
     *,
     timeout_seconds: float,
     max_retries: int,
+    max_bytes: int,
 ) -> Base64Image:
     last_error: BaseException | None = None
     for attempt in range(1, max_retries + 1):
@@ -53,6 +55,17 @@ async def _download_one(
                 if not payload:
                     raise ImageDownloadError(f"Image download returned empty content. url={image.url}")
                 mime_type = _resolve_mime_type(response_type=content_type, fallback=image.mime_type)
+                original_size = len(payload)
+                payload, mime_type = await asyncio.to_thread(
+                    shrink_image_to_limit, payload, mime_type, max_bytes=max_bytes
+                )
+                if len(payload) != original_size:
+                    logger.info(
+                        "Shrunk oversized image. url=%s original_bytes=%s shrunk_bytes=%s",
+                        image.url,
+                        original_size,
+                        len(payload),
+                    )
                 encoded = base64.b64encode(payload).decode("ascii")
                 return Base64Image(
                     base64_data=encoded,
@@ -90,6 +103,7 @@ async def download_images_as_base64(
     *,
     timeout_seconds: float,
     max_retries: int,
+    max_bytes: int,
 ) -> list[Base64Image]:
     if not images:
         return []
@@ -104,6 +118,7 @@ async def download_images_as_base64(
                         image,
                         timeout_seconds=timeout_seconds,
                         max_retries=max_retries,
+                        max_bytes=max_bytes,
                     )
                 )
             except Exception:

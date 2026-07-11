@@ -58,6 +58,7 @@ async def _normalize_messages(
     llm_enable_image: bool,
     image_download_timeout_seconds: float,
     image_download_max_retries: int,
+    image_max_bytes: int,
 ) -> list[Message]:
     out: list[Message] = []
     for m in messages:
@@ -69,6 +70,7 @@ async def _normalize_messages(
                 extract_image_inputs(m),
                 timeout_seconds=image_download_timeout_seconds,
                 max_retries=image_download_max_retries,
+                max_bytes=image_max_bytes,
             )
         attachments = extract_attachment_inputs(m, include_images=llm_enable_image)
         if not text and not images and not attachments:
@@ -193,6 +195,7 @@ class AIResponseHandler(ActionHandler):
         llm_enable_image: bool,
         image_download_timeout_seconds: float,
         image_download_max_retries: int,
+        image_max_bytes: int,
     ) -> None:
         self._ai_client = ai_client
         self._bot_user_id = bot_user_id
@@ -202,6 +205,7 @@ class AIResponseHandler(ActionHandler):
         self._llm_enable_image = llm_enable_image
         self._image_download_timeout_seconds = image_download_timeout_seconds
         self._image_download_max_retries = image_download_max_retries
+        self._image_max_bytes = image_max_bytes
 
     async def handle(
         self,
@@ -244,6 +248,7 @@ class AIResponseHandler(ActionHandler):
                 llm_enable_image=self._llm_enable_image,
                 image_download_timeout_seconds=self._image_download_timeout_seconds,
                 image_download_max_retries=self._image_download_max_retries,
+                image_max_bytes=self._image_max_bytes,
             )
         except Exception:
             logger.exception(
@@ -351,6 +356,7 @@ class AIResponseHandler(ActionHandler):
                 llm_enable_image=self._llm_enable_image,
                 image_download_timeout_seconds=self._image_download_timeout_seconds,
                 image_download_max_retries=self._image_download_max_retries,
+                image_max_bytes=self._image_max_bytes,
             )
         except Exception:
             logger.exception(

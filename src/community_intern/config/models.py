@@ -73,6 +73,10 @@ class KnowledgeBaseSettings(BaseModel):
 
     max_source_bytes: int
 
+    image_download_timeout_seconds: float
+    image_download_max_retries: int
+    image_max_bytes: int
+
     # KB source summarization prompt
     summarization_prompt: str
 

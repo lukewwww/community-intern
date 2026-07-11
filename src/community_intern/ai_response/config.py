@@ -35,3 +35,4 @@ class AIConfig(BaseModel):
     llm_image_adapter: str = "OpenAIImageAdapter"
     image_download_timeout_seconds: float = 20
     image_download_max_retries: int = 2
+    image_max_bytes: int

@@ -60,6 +60,7 @@ class QACaptureHandler(ActionHandler):
         llm_enable_image: bool,
         image_download_timeout_seconds: float,
         image_download_max_retries: int,
+        image_max_bytes: int,
         classifier: MessageClassifier | None = None,
     ) -> None:
         self._manager = manager
@@ -67,6 +68,7 @@ class QACaptureHandler(ActionHandler):
         self._llm_enable_image = llm_enable_image
         self._image_download_timeout_seconds = image_download_timeout_seconds
         self._image_download_max_retries = image_download_max_retries
+        self._image_max_bytes = image_max_bytes
 
     def set_classifier(self, classifier: MessageClassifier) -> None:
         """Inject the classifier after initialization."""
@@ -292,6 +294,7 @@ class QACaptureHandler(ActionHandler):
                     inputs,
                     timeout_seconds=self._image_download_timeout_seconds,
                     max_retries=self._image_download_max_retries,
+                    max_bytes=self._image_max_bytes,
                 )
             except Exception:
                 logger.exception("Failed to download image attachments. message_id=%s", msg_id)
