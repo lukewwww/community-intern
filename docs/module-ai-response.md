@@ -121,9 +121,10 @@ When the selected sources include URL identifiers, the final reply text includes
 
 ## LLM Integration
 
-The module uses `langchain-crynux` (`ChatCrynux`, ChatOpenAI-compatible) for all reply workflow interactions:
+The module uses `langchain-crynux` (`ChatCrynux`) for all reply workflow interactions:
 
 - **Graph workflow**: A `ChatCrynux` instance is created at graph build time and injected into graph nodes
+- **Transport**: ChatCrynux MUST use the OpenAI Responses API with `background=true`. ChatCrynux creates the Responses job, polls until the job completes or fails, and returns a finished message to the graph nodes.
 
 AI response operations MUST use ChatCrynux configured from `ai_response.llm`.
 
@@ -147,13 +148,18 @@ The `ai_response.llm` object defines:
 - `vram_limit`: Minimum GPU VRAM required for the inference run in GB.
 - `max_completion_tokens`: Maximum generated tokens per LLM call.
 - `structured_output_method`: Structured output mode (`json_schema` or `function_calling`).
-- `timeout_seconds`: Timeout per individual LLM call (network timeout).
-- `max_retries`: Maximum retry attempts for transient failures.
+- `structured_output_max_attempts`: Total attempts per LLM workflow step. When a step's LLM call fails or its structured output cannot be parsed, the step is re-invoked until this limit is reached. Minimum: 1. Default: 2.
+- `use_responses_api`: MUST be `true`. ChatCrynux MUST call the OpenAI Responses API.
+- `background`: MUST be `true`. ChatCrynux MUST submit Responses jobs with `background=true` and poll until completion inside `invoke` / `ainvoke`.
+- `http_timeout_seconds`: HTTP timeout in seconds for each Responses `create` or `retrieve` request when `background` is `true`. Default: 3.
+- `poll_interval`: Seconds between Responses `retrieve` polls when `background` is `true`. Default: 10.0.
+- `timeout_seconds`: Total polling timeout in seconds for one LLM call when `background` is `true`. This bounds how long ChatCrynux waits for a background Responses job to finish.
+- `max_retries`: Maximum retry attempts for transient failures at the HTTP client level.
 
 The AI response module MUST use `ai_response.llm` for `generate_reply`. Knowledge Base LLM overrides are configured under `kb.llm` and MUST NOT change AI response behavior.
 
 ### Graph-Specific Keys (`generate_reply`)
-- **Workflow Timeout**: `graph_timeout_seconds` (End-to-end timeout for the entire graph execution).
+- **Workflow Timeout**: `graph_timeout_seconds` (End-to-end timeout for the entire graph execution). This timeout MUST cover every LLM step in the graph, including background polling time for each step.
 - **Project Introduction**: `project_introduction` (shared domain introduction appended to multiple prompt steps).
 - **Verification Toggle**: `enable_verification` (When `true`, run the verification step after generation. When `false`, return the generated answer as final without verification. Default: `false`.)
 - **Prompts**: `gating_prompt`, `selection_prompt`, `answer_prompt`, `verification_prompt`.
@@ -170,6 +176,8 @@ Image adapter implementations live in `src/community_intern/llm/image_adapters.p
 ## Error Handling
 
 - **Timeouts**: Strict timeouts apply to the overall request and individual LLM calls.
+- **Step Retries**: Each LLM step (gating, selection, generation, verification) is retried on failure, including unparsable or null structured output, up to `structured_output_max_attempts` total attempts.
+- **Plain Text Fallback**: In the answer generation step, when the model returns plain text content without a structured tool call, the text content is used directly as the draft answer instead of retrying.
 - **Fail-Safe**: If any step in the graph fails (e.g., API error, validation error), the module returns `should_reply=false` rather than crashing.
 - **Image Failures**: If any required image download fails, the module MUST return `should_reply=false` without answering.
 - **Logging**: Detailed logs capture the decision path (gating -> selection -> generation) for debugging.

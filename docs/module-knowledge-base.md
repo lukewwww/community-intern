@@ -48,7 +48,9 @@ The Knowledge Base reads these keys under the `kb` section:
 - `kb.team_index_path`
 - `kb.team_index_cache_path`
 
-`kb.llm` defines optional LLM overrides for Knowledge Base operations. When `kb.llm` is `null`, the Knowledge Base MUST use the `ai_response.llm` settings. When configured, `kb.llm` MUST define `base_url`, `api_key`, `model`, `timeout_seconds`, and `max_retries`. It MAY define `vram_limit`, `max_completion_tokens`, and `structured_output_method`.
+`kb.llm` defines optional LLM overrides for Knowledge Base operations. When `kb.llm` is `null`, the Knowledge Base MUST use the `ai_response.llm` settings. When configured, `kb.llm` MUST define `base_url`, `api_key`, `model`, `timeout_seconds`, and `max_retries`. It MAY define `vram_limit`, `max_completion_tokens`, `structured_output_method`, `structured_output_max_attempts`, `use_responses_api`, `background`, `http_timeout_seconds`, and `poll_interval`.
+
+When `use_responses_api` and `background` are unset, they default to `true`. ChatCrynux MUST use the OpenAI Responses API with `background=true`. `timeout_seconds` MUST bound the total background polling time for one LLM call. `http_timeout_seconds` MUST bound each Responses `create` or `retrieve` HTTP request. `poll_interval` MUST set the delay between `retrieve` polls.
 
 The Knowledge Base uses the shared LLM invoker in `src/community_intern/llm/invoker.py`, which creates ChatCrynux configured from `kb.llm` when set, or from `ai_response.llm` when `kb.llm` is `null`.
 

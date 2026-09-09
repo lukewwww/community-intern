@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
 from typing import Optional, Sequence, Type, TypeVar
@@ -13,7 +12,7 @@ from community_intern.llm.image_adapters import ImagePart, TextPart, get_image_a
 from community_intern.core.models import ImageInput
 from community_intern.llm.image_utils import build_base64_images
 from community_intern.llm.settings import LLMSettings
-from community_intern.llm.structured_output import parse_structured_llm_result
+from community_intern.llm.structured_output import invoke_structured_llm
 from community_intern.logging.flow import format_llm_flow_log, format_text_preview, text_chars
 
 T = TypeVar("T", bound=BaseModel)
@@ -100,11 +99,14 @@ class LLMInvoker:
                 ]
             ),
         )
-        result = await asyncio.wait_for(
-            structured_llm.ainvoke(messages),
-            timeout=self._llm_config.timeout_seconds,
+        validated, response_id = await invoke_structured_llm(
+            structured_llm,
+            messages,
+            response_model,
+            max_attempts=self._llm_config.structured_output_max_attempts,
+            step=f"invoker:{response_model.__name__}",
+            timeout_seconds=self._llm_config.timeout_seconds,
         )
-        validated, response_id = parse_structured_llm_result(result, response_model)
 
         logger.info(
             "%s",

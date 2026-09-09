@@ -23,7 +23,12 @@ ai_response:
     vram_limit: 24
     max_completion_tokens: 1024
     structured_output_method: "function_calling" # "json_schema" if the model supports native JSON schema structured output, otherwise "function_calling" (default)
-    timeout_seconds: 60
+    structured_output_max_attempts: 2 # total attempts per workflow step when the LLM call fails or returns unparsable structured output
+    use_responses_api: true
+    background: true
+    http_timeout_seconds: 3
+    poll_interval: 10.0
+    timeout_seconds: 600
     max_retries: 2
 
   llm_enable_image: false
@@ -32,7 +37,7 @@ ai_response:
   image_download_max_retries: 2
   image_max_bytes: 2097152
 
-  graph_timeout_seconds: 200
+  graph_timeout_seconds: 2400
 
   enable_verification: false
 

@@ -14,7 +14,7 @@ from community_intern.llm.image_adapters import ContentPart, ImagePart, LLMImage
 from community_intern.core.models import AttachmentInput, Conversation, ImageInput, Message, RequestContext, AIResult
 from community_intern.kb.interfaces import KnowledgeBase, SourceContent
 from community_intern.llm.prompts import compose_system_prompt
-from community_intern.llm.structured_output import parse_structured_llm_result
+from community_intern.llm.structured_output import invoke_structured_llm
 from community_intern.core.formatters import format_message_as_text, format_conversation_as_text
 from community_intern.logging.flow import (
     format_conversation_messages,
@@ -150,10 +150,12 @@ async def node_gating(
                 ("Message", format_conversation_messages(conversation)),
             ]
         )
-        result = await structured_llm.ainvoke(messages)
-        decision, response_id = parse_structured_llm_result(
-            result,
+        decision, response_id = await invoke_structured_llm(
+            structured_llm,
+            messages,
             LLMGateDecision,
+            max_attempts=config.llm.structured_output_max_attempts,
+            step="gating",
         )
         next_step = "selection" if decision.should_reply else "end"
         _log_llm_flow(
@@ -239,10 +241,12 @@ async def node_selection(
                 ("Message", format_conversation_messages(conversation)),
             ]
         )
-        raw_result = await structured_llm.ainvoke(messages)
-        result, response_id = parse_structured_llm_result(
-            raw_result,
+        result, response_id = await invoke_structured_llm(
+            structured_llm,
+            messages,
             LLMSelectionResult,
+            max_attempts=config.llm.structured_output_max_attempts,
+            step="selection",
         )
         selected_ids = result.selected_source_ids[:config.max_sources]
         next_step = "loading" if selected_ids else "end"
@@ -360,10 +364,13 @@ async def node_generation(
                 ("Message", format_conversation_messages(conversation)),
             ]
         )
-        raw_result = await structured_llm.ainvoke(messages)
-        result, response_id = parse_structured_llm_result(
-            raw_result,
+        result, response_id = await invoke_structured_llm(
+            structured_llm,
+            messages,
             LLMGenerationResult,
+            max_attempts=config.llm.structured_output_max_attempts,
+            step="generation",
+            raw_content_fallback=lambda content: LLMGenerationResult(answer=content),
         )
         answer = (result.answer or "").strip()
         # Fix: Some models return the literal string "null" or "Null" when instructed to return null.
@@ -449,10 +456,12 @@ async def node_verification(
                 ("Message", format_conversation_messages(conversation)),
             ]
         )
-        raw_result = await structured_llm.ainvoke(messages)
-        result, response_id = parse_structured_llm_result(
-            raw_result,
+        result, response_id = await invoke_structured_llm(
+            structured_llm,
+            messages,
             LLMVerificationResult,
+            max_attempts=config.llm.structured_output_max_attempts,
+            step="verification",
         )
 
         is_good_enough = result.is_good_enough

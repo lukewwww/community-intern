@@ -93,6 +93,7 @@ The Team Knowledge module uses the shared LLM invoker component for LLM operatio
 - Uses `with_structured_output` for automatic JSON schema and validation
 - Appends `project_introduction` from AI response config to all LLM calls
 - LLM calls MUST use ChatCrynux with `kb.llm` when configured, otherwise they MUST use `ai_response.llm`
+- ChatCrynux MUST use the OpenAI Responses API with `background=true`, using the same LLM settings fields as `ai_response.llm` (`use_responses_api`, `background`, `http_timeout_seconds`, `poll_interval`, and `timeout_seconds` as the total polling timeout)
 - Image summarization MUST use `invoke_llm` with base64 images provided by the Discord adapter
 - Image downloads use `src/community_intern/llm/image_transport.py`
 - Image adapters live in `src/community_intern/llm/image_adapters.py`
@@ -101,6 +102,7 @@ The Team Knowledge module uses the shared LLM invoker component for LLM operatio
 ### LLM Instances
 
 - Team Knowledge MUST use its own ChatCrynux instance configured from `kb.llm` when set, or from `ai_response.llm` when `kb.llm` is null.
+- That ChatCrynux instance MUST use the OpenAI Responses API with `background=true`.
 
 LLM responses are kept minimal to reduce token usage and improve reliability:
 
